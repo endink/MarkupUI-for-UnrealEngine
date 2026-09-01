@@ -277,12 +277,16 @@ Shader 描述至少需要表达：
 - [x] Render Thread 使用 Frame 捕获的 generation token 报告成功或失败，过期 Frame 不能覆盖新状态。
 - [x] 恢复后的第一帧成功时只输出一条 Debug 诊断。
 - [x] 零面积或完全位于可见区域外的 Layer 作为正常空工作跳过，不记为错误。
+- [x] 完全裁剪的 mask-image 保留有效逻辑 filter handle，但不创建零尺寸 GPU 资源或保存命令，
+  后续空区域 composite 正常跳过且不输出错误。
 
 验收标准：
 
 - 同一非法 Layer 命令流持续存在时，只在首次失败时输出一条 Error，后续帧不重复提交 GPU 绘制。
 - 修正文档、更新命令或改变相关 Target 状态后能够自动重试，不要求重启 Editor。
 - 文档级结构损坏在重新加载文档前保持隔离，其他 Widget 和 Pipeline 不受影响。
+- `MarkupUI.Rendering.Pipeline.EmptyMaskImage` Automation Test 已验证空 mask 不产生保存命令、
+  持久资源或错误日志。
 
 ## 高级视觉支持开发阶段
 
@@ -380,7 +384,8 @@ texture 交替作为输入和输出，每个颜色矩阵都是独立 pass。中�
 - GPU Automation Test 覆盖七种颜色效果、声明顺序、中间 pass clamp、透明像素、opacity 与
   color matrix 混合链，以及 1×/4× MSAA 一致性。
 - 2026-09-01 使用 `MarkupUI` 过滤器执行完整插件 C++ 测试集：发现 33 项，33 项成功，0 项失败。
-- 全功能测试页已加入 F01–F08；仍需完成 UE 与 RmlUi Document Viewer 的视觉对比确认。
+- 全功能测试页 F01–F08 已使用相同字体完成 UE 与 RmlUi Document Viewer 对比，颜色、透明度、
+  filter 顺序和位移结果一致；此前观察到的文字清晰度差异来自测试字体不同，不是 filter 像素差异。
 
 ### 阶段 5：Blur 与 Drop Shadow
 
@@ -471,7 +476,7 @@ RegisterDrawShader(
 - [x] 二维 transform（T04）
 - [x] 透视 transform（T01–T03）
 - [x] opacity filter（L01–L03）
-- [ ] 其余每一种颜色 filter（F01–F08 已加入，等待 UE 与 Viewer 视觉确认）
+- [x] 其余每一种颜色 filter（F01–F08，使用相同字体后 UE 与 Viewer 视觉一致）
 - [ ] blur
 - [ ] drop-shadow
 - [ ] backdrop-filter
