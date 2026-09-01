@@ -11,7 +11,7 @@
 
 ## 当前结论
 
-当前插件的 RCSS 解析、层叠、选择器和布局能力主要由完整的 RmlUi 6.3 核心提供，完成度较高；普通几何、字体、图片、矩形裁剪、stencil clip、预乘 Alpha 混合和 GPU 透视变换已经可用。高级视觉回调已经进入 typed 通用命令协议，并建立 Target 能力、失败契约和跨线程 Render Health；默认 Slate Target 已执行 RDG layer、无 Filter 的 Blend/Replace composite、opacity filter，并支持将 Layer 保存为同帧或跨帧可采样纹理；其余 filter、shader 与 mask 能力仍会明确拒绝。
+当前插件的 RCSS 解析、层叠、选择器和布局能力主要由完整的 RmlUi 6.3 核心提供，完成度较高；普通几何、字体、图片、矩形裁剪、stencil clip、预乘 Alpha 混合和 GPU 透视变换已经可用。高级视觉回调已经进入 typed 通用命令协议，并建立 Target 能力、失败契约和跨线程 Render Health；默认 Slate Target 已执行 RDG layer、Blend/Replace composite、全部基础颜色 filter，并支持将 Layer 保存为同帧或跨帧可采样纹理或 alpha mask；其余尚未实现的 blur、drop-shadow、backdrop-filter 与 shader 能力会明确拒绝。
 
 当前完成度估计：
 
@@ -20,18 +20,18 @@
 | RCSS 解析、层叠、选择器、布局 | 90–95% |
 | 普通几何、字体、图片、scissor | 90–95% |
 | 精确基础渲染语义 | 85–90% |
-| 内置高级视觉效果 | 20–30% |
-| RmlUi 6.3 完整视觉后端 | 约 55–60% |
+| 内置高级视觉效果 | 35–45% |
+| RmlUi 6.3 完整视觉后端 | 约 60–65% |
 
 当前里程碑状态：
 
-- 已关闭：任务 0.1–0.6、任务 0.8、阶段 2 Layer 合成。
+- 已关闭：任务 0.1–0.6、任务 0.8、阶段 2 Layer 合成、阶段 3 Layer 保存与跨帧资源生命周期、阶段 4 基础颜色 Filter。
 - 核心完成但保留后期优化：任务 0.7 编译几何复用。
-- 部分完成：阶段 1 Layer 生命周期、阶段 3 Save Layer、阶段 4 颜色 Filter、阶段 6 Filter 调度、阶段 8 Box Shadow、阶段 12 视觉回归。
-- 下一项功能主线：阶段 3 `SaveLayerAsMaskImage` 与 mask filter 持久资源生命周期。
+- 部分完成：阶段 1 Layer 生命周期、阶段 6 Filter 调度、阶段 7 Mask Image、阶段 8 Box Shadow、阶段 12 视觉回归。
+- 下一项功能主线：阶段 5 Blur 与 Drop Shadow。
 
-架构重构已经承载首批高级 RCSS 像素能力：局部离屏 Layer、Blend/Replace composite 和 opacity
-filter 已进入真实 RDG 执行；后续主要缺口转为保存 Layer、颜色矩阵、blur、shadow、mask 和 gradient。
+架构重构已经承载首批高级 RCSS 像素能力：局部离屏 Layer、Blend/Replace composite、opacity
+filter、基础颜色矩阵 filter、Layer 保存和 alpha mask 已进入真实 RDG 执行；后续主要缺口转为 blur、shadow、backdrop、复杂 mask 组合和 gradient。
 
 ## 当前实现校对
 
@@ -57,10 +57,10 @@ filter 已进入真实 RDG 执行；后续主要缺口转为保存 Layer、颜�
 ### 尚未完成的高级像素执行
 
 Pipeline 已能记录完整逻辑描述和操作顺序。默认 Slate Target 当前真实执行 bounded RDG layer、
-Blend/Replace composite、source-layer stencil 裁剪快照和 opacity filter；其他 filter、shader、mask
-和 save-mask 请求仍返回失败，不再退化成普通 geometry 或产生“成功但无效果”的伪 handle。
+Blend/Replace composite、source-layer stencil 裁剪快照、全部基础颜色 filter、保存纹理和保存 alpha mask；
+其他尚未实现的 filter 与 shader 请求仍返回失败，不再退化成普通 geometry 或产生“成功但无效果”的伪 handle。
 
-默认 Slate 像素着色器仍然只有以下语义：
+默认 Slate 普通 geometry 像素着色器仍然只有以下语义：
 
 ```hlsl
 return Input.Color * Texture.Sample(TextureSampler, Input.UV);
@@ -70,11 +70,10 @@ return Input.Color * Texture.Sample(TextureSampler, Input.UV);
 
 - linear、radial、conic 及 repeating gradient
 - 自定义 `decorator: shader(...)`
-- 除 opacity 外的颜色矩阵、blur 和 drop-shadow `filter`
+- blur 和 drop-shadow `filter`
 - `backdrop-filter`
-- `mask-image`
 - 模糊或依赖离屏 layer 的 `box-shadow`
-- layer 保存为 mask
+- mask 与 scissor、圆角 clip、transform 的复杂组合
 
 ## 对旧结论的修正
 
@@ -92,7 +91,7 @@ Unreal Asset 模式目前仍只接受 `/Game/` 和 `/Engine/`，尚未普遍支�
 - `SetInverse`：清除为有效区域，再将几何覆盖区域写为无效。
 - `Intersect`：通过递增 stencil reference 保留连续 mask 的交集。
 
-连续圆角、inverse 和 intersect 已进入视觉测试页；后续 Layer、Filter 和 Mask Image 仍需验证它们与离屏目标组合时的行为。
+连续圆角、inverse 和 intersect 已进入视觉测试页；基础 saved mask 也已通过 L07/L08 的 UE 与 Viewer 对比。后续仍需验证 mask 与 scissor、圆角 clip、transform 的组合行为。
 
 ### Premultiplied alpha 已按官方语义执行
 
@@ -330,7 +329,7 @@ Shader 描述至少需要表达：
 ### 阶段 3：保存 Layer 与跨帧资源生命周期
 
 - [x] `SaveLayerAsTexture()` 返回可供普通 geometry 使用的 texture handle。
-- [ ] `SaveLayerAsMaskImage()` 返回 mask filter handle，而不是普通纹理 handle。
+- [x] `SaveLayerAsMaskImage()` 返回 mask filter handle，而不是普通纹理 handle。
 - [x] 保存结果在命令出现的位置生成独立快照；同帧通过 `FRDGTextureRef` 使用，跨帧通过
   RDG extraction 转换为 `IPooledRenderTarget`，下一帧重新注册为 external RDG texture。
 - [x] 保存范围严格使用命令捕获的 scissor；超出当前 Layer 可见范围的部分保持透明。
@@ -339,7 +338,8 @@ Shader 描述至少需要表达：
 - [x] `FDrawFrame` 仅持有 RenderThread 消费本帧所需的强引用。
 - [x] `ReleaseTexture` 从 Target 活跃表移除 backing，在途 Frame 通过快照强引用安全完成；
   未知或重复释放为 no-op。
-- [ ] `SaveLayerAsMaskImage` 与 `ReleaseFilter` 的持久资源路径。
+- [x] `SaveLayerAsMaskImage` 与 `ReleaseFilter` 的持久资源路径：同帧使用 RDG 快照，跨帧使用
+  Target 持有的 pooled render target；释放后由在途 Frame 快照保持 GPU backing 存活。
 
 RmlUi 的 box-shadow 可能缓存 `SaveLayerAsTexture()` 的结果，因此保存结果不能只存在于当前帧。
 
@@ -347,24 +347,40 @@ RmlUi 的 box-shadow 可能缓存 `SaveLayerAsTexture()` 的结果，因此保�
 
 - GPU Automation Test 已覆盖 Save 后同帧采样、保存后继续修改源 Layer、跨帧采样、
   `ReleaseTexture` 与在途 Frame、1×/4× MSAA 一致性以及 Target 销毁后的引用安全。
+- mask 对应的同帧快照、源 Layer 后续修改隔离、跨帧复用、局部 Bounds、1×/4× MSAA、
+  `ReleaseFilter` 在途释放和 Target cache 销毁均已通过 GPU Automation Test。
+- 2026-09-01 使用 `MarkupUI` 过滤器执行完整插件 C++ 测试集：发现 14 项，14 项成功，0 项失败。
+- 全功能测试页 L07 `SaveLayerAsMaskImage` alpha silhouette 与 L08 persistent mask reuse
+  已确认 UE 与 RmlUi Document Viewer 视觉一致。
 - 视觉测试页 L04 已确认 sharp outer shadow 的保存纹理、偏移、颜色和圆角轮廓与 RmlUi Viewer 一致。
 - 视觉测试页 L05 已确认正负偏移的 zero-blur inset shadow 与内部裁剪一致。
 - 视觉测试页 L06 已确认多重 sharp shadow 的顺序和跨帧复用稳定，无闪烁、白色 fallback 或纹理丢失。
 
-### 阶段 4：基础颜色 Filter
+### 阶段 4：基础颜色 Filter（已完成）
 
 优先实现可用单 pass 颜色矩阵完成的 filter：
 
 - [x] opacity
-- [ ] brightness
-- [ ] contrast
-- [ ] grayscale
-- [ ] invert
-- [ ] sepia
-- [ ] hue-rotate
-- [ ] saturate
+- [x] brightness
+- [x] contrast
+- [x] grayscale
+- [x] invert
+- [x] sepia
+- [x] hue-rotate
+- [x] saturate
 
-建议在 Pipeline 中编译为通用颜色矩阵描述，Target 使用统一 shader 执行，以减少 shader permutation。
+Pipeline 将上述效果编译为通用颜色矩阵描述，Target 使用统一 pixel shader 执行，以减少 shader permutation。
+Slate Target 按 RmlUi 官方 DX12 后端的语义逐个执行声明顺序中的 filter：两个帧内 transient
+texture 交替作为输入和输出，每个颜色矩阵都是独立 pass。中间结果遵循 encoded RGBA8 UNORM
+的 clamp 与量化行为，不合并相邻矩阵，避免改变官方多 pass 的像素结果。
+
+验收状态：
+
+- CPU Automation Test 覆盖七种颜色矩阵的编译结果和非法参数拒绝。
+- GPU Automation Test 覆盖七种颜色效果、声明顺序、中间 pass clamp、透明像素、opacity 与
+  color matrix 混合链，以及 1×/4× MSAA 一致性。
+- 2026-09-01 使用 `MarkupUI` 过滤器执行完整插件 C++ 测试集：发现 33 项，33 项成功，0 项失败。
+- 全功能测试页已加入 F01–F08；仍需完成 UE 与 RmlUi Document Viewer 的视觉对比确认。
 
 ### 阶段 5：Blur 与 Drop Shadow
 
@@ -381,20 +397,21 @@ Blur 是 `filter: blur`、`backdrop-filter: blur`、drop-shadow 和模糊 box-sh
 
 - [x] opacity `filter`：元素及其子内容先进入离屏 layer，再应用 opacity 并合成到父 layer。
 - [x] 多个 opacity filter 在 composite 阶段合并为等价的累计 opacity。
-- [ ] 将同一调度扩展到颜色矩阵、blur、drop-shadow 和 mask filter。
+- [x] 将同一调度扩展到颜色矩阵和 mask filter。
+- [ ] 将同一调度扩展到 blur 和 drop-shadow。
 - [ ] `backdrop-filter`：读取元素后方已有内容，过滤并写回，再继续绘制元素。
-- [ ] 支持多个不同类型 filter 按声明顺序串联。
+- [x] 支持当前已实现的多个不同类型 filter 按声明顺序串联。
 - [ ] 处理 filter 输入区域和输出裁剪区域不同的情况。
 
 RmlUi 已经通过 layer 和 composite 调用顺序描述调度，Target 应忠实执行命令流，不应重新解释 RCSS。
 
 ### 阶段 7：Mask Image
 
-- [ ] 将 mask decorator 绘制到临时 layer。
-- [ ] `SaveLayerAsMaskImage()` 生成 mask filter。
-- [ ] 使用 mask filter 合成元素内容 layer。
-- [ ] 支持多个 mask decorator。
-- [ ] 明确 mask 使用 alpha 还是颜色通道。
+- [x] 将 mask decorator 绘制到临时 layer。
+- [x] `SaveLayerAsMaskImage()` 生成 mask filter。
+- [x] 使用 mask filter 的 alpha 通道合成元素内容 layer。
+- [x] 多个 mask decorator 由 RmlUi 绘制到同一个 mask layer 后生成单一快照。
+- [x] mask 明确只使用保存图像的 alpha 通道；RGB 不参与遮罩权重。
 - [ ] mask 与 scissor、圆角 clip、transform 同时使用时保持正确。
 
 ### 阶段 8：Box Shadow
@@ -454,11 +471,11 @@ RegisterDrawShader(
 - [x] 二维 transform（T04）
 - [x] 透视 transform（T01–T03）
 - [x] opacity filter（L01–L03）
-- [ ] 其余每一种颜色 filter
+- [ ] 其余每一种颜色 filter（F01–F08 已加入，等待 UE 与 Viewer 视觉确认）
 - [ ] blur
 - [ ] drop-shadow
 - [ ] backdrop-filter
-- [ ] mask-image
+- [x] 基础 mask-image（L07、L08）
 - [ ] inset/outset box-shadow
 - [ ] 六种 gradient
 - [x] layer Blend（L01–L03）
@@ -471,7 +488,7 @@ RegisterDrawShader(
 - [ ] resize、DPI 改变和窗口销毁
 - [ ] RHI 资源重建
 - [x] 在途 Frame 尚未消费时 `ReleaseTexture`
-- [ ] `ReleaseFilter` / `ReleaseShader`
+- [x] mask-image `ReleaseFilter`（普通 compiled filter 无 GPU backing；`ReleaseShader` 仍待 shader 阶段）
 
 ### 阶段 13：渲染性能分析与连续几何批处理
 
@@ -487,6 +504,29 @@ Premultiplied Alpha、clip、layer 或 filter 结果。
 - [ ] 合并兼容 geometry 的顶点和索引范围，减少 `DrawIndexedPrimitive` 调用与 PSO/资源切换。
 - [ ] 根据统计结果决定是否实现 Target 侧跨帧持久 GPU Geometry Cache。
 - [ ] 为批处理前后建立像素一致性测试，并记录典型普通页面与全功能测试页的 Draw Call 降幅。
+
+#### 遗留优化：连续颜色 Filter 融合
+
+该优化只在全部 RCSS 视觉功能完成并稳定后评估，不能作为颜色 Filter 的默认实现提前启用。
+
+RmlUi 官方参考后端不会预先合并多个颜色矩阵，而是按 Filter 列表的声明顺序逐个执行
+fullscreen pass，并在两张 post-process texture 之间 ping-pong。每一步都会写回 UNORM
+RenderTarget，因此会发生 clamp、截断和量化。当前 Slate Target 保留了这一官方多 Pass 语义，
+它是 UE 与 RmlUi Document Viewer 像素结果一致的默认契约。
+
+可选优化方案是将连续的 `opacity + color-matrix` 预合并为单个 pass。它可以减少中间纹理带宽、
+RenderPass 数量和 fullscreen draw call，尤其有利于大量元素串联多个颜色 Filter 的页面。但是，
+当 brightness、contrast 等中间步骤产生超出 UNORM 范围的 RGB 时，融合路径不会执行官方每一步
+的中间 clamp 与量化，后续矩阵可能重新使用这些越界值，因此最终像素可能与 Viewer 不同。
+
+这不是纯内部、结果等价的性能优化。启用前必须明确产品契约，并完成以下事项：
+
+- [ ] 统计真实页面中连续颜色 Filter 的数量、覆盖像素、pass 带宽和 GPU 时间，确认优化收益值得增加双路径复杂度。
+- [ ] 保持官方多 Pass 路径为默认且长期可用的参考路径。
+- [ ] 若实现融合路径，将其作为显式可选渲染策略，不能静默改变默认语义。
+- [ ] 为无越界矩阵链、发生中间 clamp 的矩阵链、透明像素、opacity 混合链和 1×/4× MSAA 建立双路径像素测试。
+- [ ] 文档明确融合路径只保证近似视觉一致，不承诺与 RmlUi Viewer 逐像素一致。
+- [ ] 只有在用户明确接受上述契约变化后，才能将融合路径用于生产配置。
 
 验收标准：
 
