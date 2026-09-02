@@ -11,7 +11,7 @@
 
 ## 当前结论
 
-当前插件的 RCSS 解析、层叠、选择器和布局能力主要由完整的 RmlUi 6.3 核心提供，完成度较高；普通几何、字体、图片、矩形裁剪、stencil clip、预乘 Alpha 混合和 GPU 透视变换已经可用。高级视觉回调已经进入 typed 通用命令协议，并建立 Target 能力、失败契约和跨线程 Render Health；默认 Slate Target 已执行 RDG layer、Blend/Replace composite、全部基础颜色 filter，并支持将 Layer 保存为同帧或跨帧可采样纹理或 alpha mask；其余尚未实现的 blur、drop-shadow、backdrop-filter 与 shader 能力会明确拒绝。
+当前插件的 RCSS 解析、层叠、选择器和布局能力主要由完整的 RmlUi 6.3 核心提供，完成度较高；普通几何、字体、图片、矩形裁剪、stencil clip、预乘 Alpha 混合和 GPU 透视变换已经可用。高级视觉回调已经进入 typed 通用命令协议，并建立 Target 能力、失败契约和跨线程 Render Health；默认 Slate Target 已执行 RDG layer、Blend/Replace composite、全部基础颜色 filter、Gaussian blur 和 drop-shadow，并支持将 Layer 保存为同帧或跨帧可采样纹理或 alpha mask；尚未实现的 backdrop-filter、gradient 与自定义 shader 能力会明确拒绝。
 
 当前完成度估计：
 
@@ -20,18 +20,18 @@
 | RCSS 解析、层叠、选择器、布局 | 90–95% |
 | 普通几何、字体、图片、scissor | 90–95% |
 | 精确基础渲染语义 | 85–90% |
-| 内置高级视觉效果 | 35–45% |
-| RmlUi 6.3 完整视觉后端 | 约 60–65% |
+| 内置高级视觉效果 | 60–70% |
+| RmlUi 6.3 完整视觉后端 | 约 70–75% |
 
 当前里程碑状态：
 
-- 已关闭：任务 0.1–0.6、任务 0.8、阶段 2 Layer 合成、阶段 3 Layer 保存与跨帧资源生命周期、阶段 4 基础颜色 Filter。
+- 已关闭：任务 0.1–0.6、任务 0.8、阶段 2 Layer 合成、阶段 3 Layer 保存与跨帧资源生命周期、阶段 4 基础颜色 Filter、阶段 5 Blur 与 Drop Shadow、阶段 6 Filter 与 Backdrop Filter 调度。
 - 核心完成但保留后期优化：任务 0.7 编译几何复用。
-- 部分完成：阶段 1 Layer 生命周期、阶段 6 Filter 调度、阶段 7 Mask Image、阶段 8 Box Shadow、阶段 12 视觉回归。
-- 下一项功能主线：阶段 5 Blur 与 Drop Shadow。
+- 部分完成：阶段 1 Layer 生命周期、阶段 7 Mask Image、阶段 8 Box Shadow、阶段 12 视觉回归。
+- 下一项功能主线：阶段 7 Mask Image 组合行为。
 
 架构重构已经承载首批高级 RCSS 像素能力：局部离屏 Layer、Blend/Replace composite、opacity
-filter、基础颜色矩阵 filter、Layer 保存和 alpha mask 已进入真实 RDG 执行；后续主要缺口转为 blur、shadow、backdrop、复杂 mask 组合和 gradient。
+filter、基础颜色矩阵 filter、Gaussian blur、drop-shadow、Layer 保存和 alpha mask 已进入真实 RDG 执行；后续主要缺口转为 backdrop、模糊 box-shadow 验证、复杂 mask 组合和 gradient。
 
 ## 当前实现校对
 
@@ -57,7 +57,7 @@ filter、基础颜色矩阵 filter、Layer 保存和 alpha mask 已进入真实 
 ### 尚未完成的高级像素执行
 
 Pipeline 已能记录完整逻辑描述和操作顺序。默认 Slate Target 当前真实执行 bounded RDG layer、
-Blend/Replace composite、source-layer stencil 裁剪快照、全部基础颜色 filter、保存纹理和保存 alpha mask；
+Blend/Replace composite、source-layer stencil 裁剪快照、全部基础颜色 filter、Gaussian blur、drop-shadow、保存纹理和保存 alpha mask；
 其他尚未实现的 filter 与 shader 请求仍返回失败，不再退化成普通 geometry 或产生“成功但无效果”的伪 handle。
 
 默认 Slate 普通 geometry 像素着色器仍然只有以下语义：
@@ -70,7 +70,6 @@ return Input.Color * Texture.Sample(TextureSampler, Input.UV);
 
 - linear、radial、conic 及 repeating gradient
 - 自定义 `decorator: shader(...)`
-- blur 和 drop-shadow `filter`
 - `backdrop-filter`
 - 模糊或依赖离屏 layer 的 `box-shadow`
 - mask 与 scissor、圆角 clip、transform 的复杂组合
@@ -387,28 +386,54 @@ texture 交替作为输入和输出，每个颜色矩阵都是独立 pass。中�
 - 全功能测试页 F01–F08 已使用相同字体完成 UE 与 RmlUi Document Viewer 对比，颜色、透明度、
   filter 顺序和位移结果一致；此前观察到的文字清晰度差异来自测试字体不同，不是 filter 像素差异。
 
-### 阶段 5：Blur 与 Drop Shadow
+### 阶段 5：Blur 与 Drop Shadow（已完成）
 
-- [ ] separable Gaussian blur。
-- [ ] 水平和垂直两个 pass。
-- [ ] sigma 到采样半径和 kernel 的稳定规则。
-- [ ] filter ink overflow 对 layer/scissor bounds 的扩展。
-- [ ] 临时 RenderTarget 复用。
-- [ ] drop-shadow 的 offset、颜色、blur 和原图组合。
+- [x] separable Gaussian blur。
+- [x] 水平和垂直两个 pass。
+- [x] sigma 到采样半径和 kernel 的稳定规则。
+- [x] filter ink overflow 对 layer/scissor bounds 的扩展。
+- [x] 临时 RenderTarget 复用。
+- [x] drop-shadow 的 offset、颜色、blur 和原图组合。
 
 Blur 是 `filter: blur`、`backdrop-filter: blur`、drop-shadow 和模糊 box-shadow 的共同依赖。
 
-### 阶段 6：Filter 与 Backdrop Filter 调度
+Slate Target 保留 RmlUi DX12 参考后端的有序多 Pass 语义：大 sigma 先按稳定规则逐级降采样，
+再使用 7-tap separable Gaussian kernel 执行垂直和水平 blur，最后恢复到原始分辨率。Drop Shadow
+先从源 alpha 生成带 offset 的预乘颜色图像，按需执行相同 blur，再以 source-over 规则将原图合成到阴影上。
+各步骤不融合，继续保留 encoded RGBA8 UNORM 的中间 clamp 与量化行为。
+
+Executor 使用三个按帧惰性创建的 RDG transient scratch texture，并保证输出纹理不与当前输入或第二输入
+发生 SRV/RTV alias。Composite scissor 现在参与页面离屏可见区域计算；无 scissor 的 composite 会明确
+使用完整 ViewRect，避免阴影等 filter ink overflow 被普通 geometry bounds 提前裁掉。
+
+验收状态：
+
+- CPU Automation Test 已覆盖 blur sigma 和 drop-shadow offset、颜色预乘参数的编译结果。
+- GPU Automation Test 已覆盖小 sigma blur、大 sigma 降采样 blur、带 blur 的彩色 drop-shadow，
+  blur/drop-shadow 的 1×/4× MSAA 一致性，以及 Slate `PF_A2B10G10R10` 输出目标下的 Alpha 精度回归。
+- 2026-09-02 使用插件名 `MarkupUI` 执行完整插件 C++ 测试集：发现 41 项，41 项成功，0 项失败。
+- 全功能测试页 F09–F11 已完成 UE 与 RmlUi Document Viewer 的最终视觉对比；RGBA8 UNORM
+  离屏中间格式消除了低位 Alpha 导致的分层轮廓、八边形大 blur 和 drop-shadow 矩形边界，
+  小 blur、大 blur、彩色 drop-shadow 的颜色、轮廓和衰减现已一致。
+
+### 阶段 6：Filter 与 Backdrop Filter 调度（已完成）
 
 - [x] opacity `filter`：元素及其子内容先进入离屏 layer，再应用 opacity 并合成到父 layer。
 - [x] 多个 opacity filter 在 composite 阶段合并为等价的累计 opacity。
 - [x] 将同一调度扩展到颜色矩阵和 mask filter。
-- [ ] 将同一调度扩展到 blur 和 drop-shadow。
-- [ ] `backdrop-filter`：读取元素后方已有内容，过滤并写回，再继续绘制元素。
+- [x] 将同一调度扩展到 blur 和 drop-shadow。
+- [x] `backdrop-filter`：读取元素后方已有内容，过滤并写回，再继续绘制元素。
 - [x] 支持当前已实现的多个不同类型 filter 按声明顺序串联。
-- [ ] 处理 filter 输入区域和输出裁剪区域不同的情况。
+- [x] 处理 filter 输入区域和输出裁剪区域不同的情况。
 
 RmlUi 已经通过 layer 和 composite 调用顺序描述调度，Target 应忠实执行命令流，不应重新解释 RCSS。
+
+验收状态：
+
+- 全功能测试页 B01–B03 已完成 UE 与 RmlUi Document Viewer 对比，背景过滤、前景隔离、圆角 blur
+  和多 Filter 顺序的视觉结果一致。
+- GPU Automation Test 已覆盖前景隔离、不同输入/输出区域和 Backdrop 多 Filter 顺序。
+- 2026-09-02 使用无参数默认模式执行完整插件 C++ 测试集：发现 44 项，44 项成功，0 项失败。
 
 ### 阶段 7：Mask Image
 
@@ -477,9 +502,9 @@ RegisterDrawShader(
 - [x] 透视 transform（T01–T03）
 - [x] opacity filter（L01–L03）
 - [x] 其余每一种颜色 filter（F01–F08，使用相同字体后 UE 与 Viewer 视觉一致）
-- [ ] blur
-- [ ] drop-shadow
-- [ ] backdrop-filter
+- [x] blur（F09–F10）
+- [x] drop-shadow（F11）
+- [x] backdrop-filter（B01–B03，UE 与 Viewer 视觉一致；GPU Automation Test）
 - [x] 基础 mask-image（L07、L08）
 - [ ] inset/outset box-shadow
 - [ ] 六种 gradient
