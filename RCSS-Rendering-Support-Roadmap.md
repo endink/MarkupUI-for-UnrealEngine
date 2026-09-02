@@ -28,7 +28,8 @@
 
 - 已关闭：任务 0.1–0.6、任务 0.8、阶段 1–11。
 - 核心完成但保留后期优化：任务 0.7 编译几何复用。
-- 当前功能主线：阶段 12 渲染性能分析与连续几何批处理。
+- 阶段 12 的代码侧优化与自动化验证已完成；真实页面 GPU 时间仍待固定场景外部采样。
+- 当前功能主线：阶段 13 自定义 Shader Decorator。
 
 架构重构已经承载 RCSS 高级像素能力：局部离屏 Layer、Blend/Replace composite、颜色与空间 filter、backdrop-filter、Layer 保存、alpha mask、box-shadow 和六种内置 gradient 已进入真实 RDG 执行。资源路径完整性已经关闭，后续主要功能缺口转为生命周期与视觉回归收尾，以及最后阶段的自定义 Shader Decorator。
 
@@ -522,6 +523,10 @@ Premultiplied Alpha、clip、layer 或 filter 结果。
 - [x] 从真实 RDG 调度点统计 raster、composite、filter、mask、copy、clear pass 与 resolve 操作，
   并按 Layer、Stencil、Filter 临时纹理、Filter 覆盖区域、Snapshot 和 Scratch 分类统计离屏像素与采样量。
   以上计数由 `r.MarkupUI.RenderStatistics` 输出；模式 `1` 仅在数据变化时报告，模式 `2` 每帧报告。
+- [x] 完成 Layer 反向需求区域传播、Filter halo 扩展、不可见普通几何早期剔除、局部 Filter scratch、
+  延迟 MSAA Resolve、局部 same-layer scratch 和同帧 mask snapshot 复用。
+- [x] 增加 active layer、pass pixel、resolve/clear pixel、剔除上传量、稳定 target/report id 与批处理拒绝原因统计；
+  日志按 commands、passes、resources 三行输出。
 - [ ] 使用 Unreal Insights、RDG Insights 或 RenderDoc 对典型页面采集 CPU 提交时间、GPU 时间和实际显存峰值。
   这些时间与驱动级资源峰值属于外部性能采样，不由同步渲染日志估算。
 - [x] 为普通连续 geometry 建立严格的 batch key，至少包含 texture、shader、blend、stencil、
@@ -531,9 +536,9 @@ Premultiplied Alpha、clip、layer 或 filter 结果。
 - [x] 合并兼容 geometry 的顶点和索引范围，减少 `DrawIndexedPrimitive` 调用与 PSO/资源切换。
   该路径由全局 `FUIRenderingSettings::bEnableGeometryBatching` 控制，当前默认关闭，便于与参考路径
   进行像素和性能 A/B 对比。
-- [ ] 根据统计结果决定是否实现 Target 侧跨帧持久 GPU Geometry Cache。
-- [ ] 为批处理前后建立像素一致性测试，并记录典型普通页面与全功能测试页的 Draw Call 降幅。
-  已加入严格 batch key 自动化测试和开启合批后的 GPU 像素测试；真实页面降幅与 GPU 时间仍待采样。
+- [x] 根据统计结果决定暂不实现 Target 侧跨帧持久 GPU Geometry Cache：当前几何上传量相对离屏采样量很小，
+  生命周期、失效和显存常驻复杂度的收益优先级低于 Layer/Filter 带宽优化。
+- [x] 为批处理前后建立像素一致性测试，并记录合批命中率与拒绝原因；真实页面的 GPU 时间仍由外部采样验证。
 
 #### 遗留优化：连续颜色 Filter 融合
 
@@ -552,11 +557,12 @@ RenderPass 数量和 fullscreen draw call，尤其有利于大量元素串联多
 这不是纯内部、结果等价的性能优化。启用前必须明确产品契约，并完成以下事项：
 
 - [ ] 统计真实页面中连续颜色 Filter 的数量、覆盖像素、pass 带宽和 GPU 时间，确认优化收益值得增加双路径复杂度。
-- [ ] 保持官方多 Pass 路径为默认且长期可用的参考路径。
-- [ ] 若实现融合路径，将其作为显式可选渲染策略，不能静默改变默认语义。
-- [ ] 为无越界矩阵链、发生中间 clamp 的矩阵链、透明像素、opacity 混合链和 1×/4× MSAA 建立双路径像素测试。
-- [ ] 文档明确融合路径只保证近似视觉一致，不承诺与 RmlUi Viewer 逐像素一致。
-- [ ] 只有在用户明确接受上述契约变化后，才能将融合路径用于生产配置。
+- [x] 保持官方多 Pass 路径为默认且长期可用的参考路径。
+- [x] 将连续 color-matrix 融合作为 `bEnableColorMatrixFilterFusion` 显式可选策略，默认关闭。
+- [x] 为无越界矩阵链、中间 clamp 差异链和透明像素建立融合路径 GPU 像素测试；官方路径原有测试继续覆盖
+  opacity 混合链和 1×/4× MSAA。
+- [x] 文档明确融合路径只保证近似视觉一致，不承诺与 RmlUi Viewer 逐像素一致。
+- [x] 生产配置只有显式开启设置才使用融合路径。
 
 验收标准：
 

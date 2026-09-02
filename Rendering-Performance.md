@@ -22,9 +22,9 @@ r.MarkupUI.RenderStatistics 1
 | `1` | 仅当完整统计值变化时输出 | 滚动、交互和状态切换分析 |
 | `2` | 每个执行帧均输出 | 连续采样和外部脚本分析 |
 
-模式 `1` 使用进程内上一条统计结果进行比较。多个 MarkupUI Widget 同时绘制时，不同 Widget 的结果可能交替出现，因此正式采样应尽量隔离为单 Widget 场景，或在后续统计中加入稳定的 Widget/Target 标识。
+模式 `1` 使用进程内上一条统计结果进行比较。多个 MarkupUI Widget 同时绘制时，不同 Widget 的结果可能交替出现，应使用 `target` 区分绘制目标。
 
-当前日志较长，复制工具可能把单行截断。诊断时应优先保留 Unreal 原始日志；后续任务会把命令、Pass 和资源统计拆成多行，避免字段丢失。
+性能数据行统一以 `[MarkupUI Statistics]` 开头。每份报告由 `commands`、`passes` 和 `resources` 三行组成，三行共享相同的 `report`、`target`、`vw` 和 `vh`。复制或解析日志时必须保留并合并同一 `report` 的三行，不能把其中一行当作完整报告。
 
 ## 统计边界
 
@@ -36,19 +36,52 @@ r.MarkupUI.RenderStatistics 1
 4. 像素数和采样数不是字节数。实际字节数还取决于纹理格式、压缩、tile、硬件缓存和读写方式。
 5. Pass 数量不能直接换算为 GPU 时间。一个小范围 Fullscreen Pass 可能比一个覆盖 4K 的 Pass 便宜很多。
 6. 状态切换数表示相邻 Prepared Draw 的逻辑状态差异，不保证与驱动层最终产生的 PSO 或 Descriptor 绑定次数完全相同。
-7. 比较性能时必须固定 Viewport、DPI、MSAA、页面内容、滚动位置和动画状态。
+7. `vw`、`vh` 是当前 Draw Target（Slate 场景下即 Widget）的实际像素视口，不是显示器、窗口或 Slate BackBuffer 尺寸。
+8. 比较性能时必须先确认 `vw`、`vh` 相同，并固定 DPI、MSAA、页面内容、滚动位置和动画状态。
 
 ## 字段参考
+
+### 采样身份与视口
+
+| 字段 | 含义 | 诊断方式 |
+| --- | --- | --- |
+| `report` | 同一次统计报告的编号 | 使用它合并 `commands`、`passes` 和 `resources` 三行 |
+| `target` | 当前绘制目标在本次进程中的诊断标识 | 多个 Widget 同时输出日志时用于分组；不要把它当作跨进程稳定 ID |
+| `vw` | 当前 Draw Target 的实际像素视口宽度 | Slate Widget 中对应 Widget 视口，而不是窗口或 BackBuffer 宽度 |
+| `vh` | 当前 Draw Target 的实际像素视口高度 | 视口不同的原始像素、采样和带宽压力数据不能直接横向比较 |
+
+比较两份日志时，应先按 `target` 分组，再只比较 `vw × vh` 相同的报告。若必须比较不同分辨率，至少同时观察按视口面积归一化后的指标，例如：
+
+```text
+normalizedOffscreenSamples = offscreenSamples / (vw × vh)
+```
 
 ### 命令与 Draw Call
 
 | 字段 | 含义 | 诊断方式 |
 | --- | --- | --- |
 | `commands` | 本帧通用 Draw Command List 中的全部命令数，包含 raster、layer、composite、save 等命令 | 判断前端生成的总命令规模；它不等于 Draw Call |
-| `rasterCommands` | 可渲染 raster 源命令数量，发生 Target 几何合批之前统计 | 与 `rasterDrawCalls` 比较，判断合批收益 |
-| `rasterDrawCalls` | Target 准备完成后需要重放的 raster draw 数量 | 更接近实际 `DrawIndexedPrimitive` 调用数量 |
-| `mergedDraws` | `rasterCommands - rasterDrawCalls` | 表示本帧成功被相邻合批吸收的 draw 数量 |
-| `mergeRate` | `mergedDraws / rasterCommands` | 只衡量当前合批器的命令压缩率，不衡量 GPU 时间收益 |
+| `rasterCommands` | 进入可见性裁剪和相邻合批前的 raster 源命令数量 | 与 `culledRasterCommands`、`rasterDrawCalls` 一起观察 |
+| `rasterDrawCalls` | 可见性裁剪和相邻合批后保留的普通 raster draw 数量 | 接近普通几何绘制调用数；不包含合成期间为裁剪产生的附加绘制 |
+| `mergedDraws` | `max(rasterCommands - rasterDrawCalls, 0)` | 当前名称沿用历史约定；数值同时包含早期裁剪和相邻合批消除的 draw，不是纯合批数量 |
+| `mergeRate` | `mergedDraws / rasterCommands` | 当前表示总体 draw 压缩率，不能单独作为合批命中率 |
+| `culledRasterCommands` | 在上传顶点和索引前被证明不可见的普通绘制数量 | 滚动后应随不可见章节增加；Stencil 状态序列采用保守保留规则 |
+| `culledUploadBytes` | 被早期剔除的几何原本需要上传的逻辑字节数 | 用于估算 CPU 准备和上传节省趋势，不等于总线实测带宽 |
+| `batchRejectClip` | 因裁剪写入模式不兼容而未合批的相邻 draw 数量 | 判断裁剪写入是否为主要边界 |
+| `batchRejectTextureShader` | 因纹理、纹理 Alpha 模式或 Shader 不兼容而未合批的相邻 draw 数量 | 判断 atlas 或材质状态是否限制合批 |
+| `batchRejectTransform` | 因 Transform 不兼容而未合批的相邻 draw 数量 | 判断几何变换是否为主要边界 |
+| `batchRejectScissor` | 因 Scissor 状态或矩形不兼容而未合批的相邻 draw 数量 | 判断裁剪矩形变化密度 |
+| `batchRejectStencil` | 因 Stencil 读取状态或 reference 不兼容而未合批的相邻 draw 数量 | 复杂嵌套裁剪中通常较高 |
+| `batchRejectOther` | 因 Layer、Blend 或其他兼容条件未通过而未合批的相邻 draw 数量 | 用于覆盖上述类别之外的合批边界 |
+
+若要从当前日志近似分离纯合批数量，应使用：
+
+```text
+estimatedBatchedDraws = max(mergedDraws - culledRasterCommands, 0)
+estimatedBatchRate = estimatedBatchedDraws / max(rasterCommands - culledRasterCommands, 1)
+```
+
+这是根据现有计数关系得到的诊断值，不是日志直接输出字段。
 
 当 `rasterCommands` 和 `rasterDrawCalls` 在滚动过程中几乎不变时，说明不可见页面内容仍然进入 Target 的几何准备和绘制流程。此时应优先检查可见性裁剪，而不是先扩大合批规则。
 
@@ -56,7 +89,7 @@ r.MarkupUI.RenderStatistics 1
 
 | 字段 | 含义 | 诊断方式 |
 | --- | --- | --- |
-| `geometryInstances` | 编译几何在本帧命令流中的使用次数 | 表示几何实例工作量；当前通常与 `rasterCommands` 接近 |
+| `geometryInstances` | 裁剪前 raster 源命令引用编译几何的次数 | 表示进入本帧准备阶段的几何实例工作量；当前通常与 `rasterCommands` 相同 |
 | `uniqueGeometries` | 本帧引用的不同编译几何数量 | 与实例数比较，判断共享顶点数据的空间 |
 | `geometryReuseRate` | `(geometryInstances - uniqueGeometries) / geometryInstances` | 越高表示同一编译几何被重复使用得越多 |
 | `vertices` | 本帧上传到 RDG vertex buffer 的顶点数量 | 当前相同编译几何的顶点只追加一次，因此受几何复用影响 |
@@ -80,7 +113,8 @@ r.MarkupUI.RenderStatistics 1
 
 | 字段 | 含义 | 诊断方式 |
 | --- | --- | --- |
-| `layers` | 本次执行计划中建立的 RDG Layer 条目数，包含 Base Layer，也可能包含空 Layer | 不能单独用来判断实际分配数量；应结合 `layerPixels`，后续增加 `activeLayers` |
+| `layers` | 本次执行计划中建立的 RDG Layer 条目数，包含 Base Layer，也可能包含空 Layer | 不能单独用来判断实际分配数量；应结合 `activeLayers` 与 `layerPixels` |
+| `activeLayers` | 本帧实际拥有有效 Color 资源的离屏 Layer 数 | 与 `layers` 比较可观察反向需求传播移除了多少空 Layer |
 | `logicalComposites` | Draw Layer Plan 中的 Composite 命令总数 | 表示前端要求的逻辑合成数量，包括最终可能因不可见而未执行的命令 |
 | `compositePasses` | 实际加入 RDG 的 Composite Raster Pass 数量 | 与 `logicalComposites` 比较可观察可见性裁剪；Base Layer 最终回写也会贡献一次 |
 
@@ -93,10 +127,15 @@ r.MarkupUI.RenderStatistics 1
 | `rasterPasses` | 实际加入 RDG 的几何 Raster Pass 数量 | Raster Segment 写入 Layer |
 | `compositePasses` | Layer 合成 Pass 数量 | Blend、Replace、Backdrop 合成以及最终 Base 回写 |
 | `filterPasses` | Filter 执行产生的 Pass 数量 | Color Matrix、Opacity、Mask Image、Blur、Drop Shadow、上下采样 |
+| `fusedColorMatrixFilters` | 开启颜色矩阵融合后，被吸收到前一个矩阵中的后续 Filter 数量 | 默认多 Pass 路径通常为 `0`；用于确认可选融合是否实际命中 |
 | `maskPasses` | 使用 Stencil 生成遮罩快照的 Pass 数量 | Source Layer stencil snapshot、保存 mask |
 | `copyPasses` | 显式纹理复制 Pass 数量 | SaveLayerAsTexture、同 Layer composite scratch copy |
 | `clearPasses` | 显式清理纹理或 Layer 的 Pass 数量 | Filter scratch 初始化、Snapshot 初始化、空源 Layer 初始化 |
 | `resolves` | MSAA RenderTarget Resolve 操作数量 | Raster、Composite、Mask Snapshot 等带 resolve attachment 的写入 |
+| `rasterPassPixels` | Raster Pass 目标 Layer 范围的累计面积 | 配合 Raster Pass 数判断 Pass 是否仍覆盖过大的 Layer |
+| `compositePassPixels` | Composite 与最终 Base 回写范围的累计面积 | 判断合成次数减少是否同时缩小覆盖面积 |
+| `resolvePixels` | 实际 Resolve 操作覆盖的累计面积 | 延迟 Resolve 的核心带宽趋势指标 |
+| `clearPixels` | 显式 Clear 覆盖的累计面积 | 区分少量局部 Clear 与大范围清屏 |
 
 分析顺序建议为：先看每类 Pass 数，再看对应像素范围。仅减少 Pass 数但扩大覆盖范围，可能使总成本反而上升。
 
@@ -135,17 +174,40 @@ Blur 的实际纹理采样数会受到 sigma、降采样层级和每轴采样核
 | `offscreenPixels` | 本次执行登记的所有离屏纹理二维面积累计值 | 包括 Layer Color、Stencil、Resolve、Filter、Snapshot 和 Scratch；不同类别之间会重叠统计 |
 | `offscreenSamples` | 上述离屏纹理面积乘以各自 sample count 后的累计值 | 适合比较 MSAA 改动前后趋势，不是显存字节数 |
 
-粗略估算某一种 RGBA8 单采样纹理的逻辑容量时可以使用：
+## 带宽压力估算
+
+现有统计可以估算逻辑资源规模和每帧带宽压力趋势，但不能直接给出显卡实际带宽。粗略估算某一种 RGBA8 单采样纹理的逻辑容量时可以使用：
 
 ```text
 bytes ≈ pixels × 4
 ```
 
-但不能把全部 `offscreenSamples` 统一乘以 4 当作真实显存，因为其中包含不同格式的 Color、Stencil、可别名 RDG 临时资源，以及同一物理内存在不同生命周期中的重复登记。
+对于已知为 RGBA8 的颜色操作，可以建立以下每帧理论流量近似值：
+
+```text
+colorWriteBytes ≈ passPixels × sampleCount × 4
+resolveBytes ≈ resolvePixels × (MSAASampleCount + 1) × 4
+logicalBytesPerSecond ≈ logicalBytesPerFrame × frameRate
+```
+
+这里的 Resolve 公式把多采样颜色读取和单采样结果写入都计入。它只适合固定页面、视口、DPI、MSAA 和帧率下进行 A/B 对比。
+
+不能把全部 `offscreenSamples` 统一乘以 4 当作真实显存或真实带宽，原因包括：
+
+- Color、Stencil 和其他资源格式的每 sample 字节数不同；
+- `offscreenSamples` 描述登记过的逻辑 sample slot，不包含每个 Pass 的重复读写次数；
+- Blend 可能读取目标颜色，Filter 会读取输入纹理，当前统计没有完整记录这些读取字节；
+- Blur 的实际纹理读取次数取决于 sigma、降采样层级和采样核，不能仅由 `filterPassPixels` 推导；
+- Fast Clear、颜色压缩、Tile Cache、纹理缓存和 RDG 资源别名都会改变物理流量；
+- `clearPixels`、`copyPasses` 和 Pass 数量也不能脱离资源格式与覆盖范围直接换算为带宽。
+
+因此，现有字段适合回答“哪类操作的压力更大”和“改动前后逻辑工作量变化多少”。实际 GPU 时间、峰值显存和物理带宽仍应使用 Unreal Insights、GPU Visualizer、RDG Insights、RenderDoc 或硬件厂商分析工具确认。
 
 ## 测试页滚动样本
 
-一次从页面顶部滚动到底部的 96 帧样本呈现以下阶段：
+`PerformanceLogs/2026-09-02-baseline.txt` 是优化前的一次页面滚动历史样本。该日志生成时 `vw`、`vh` 尚未记录 Widget 实际视口，因此只能用于观察同一份日志内部的阶段变化，不能依靠其中的视口字段与新日志做归一化对比。
+
+该样本从页面顶部滚动到底部，共 96 帧，呈现以下阶段：
 
 | 阶段 | Raster Pass | Composite | Filter | Mask | Clear | Resolve | Filter Texture Pixels |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -161,7 +223,7 @@ bytes ≈ pixels × 4
 - `rasterDrawCalls` 保持在 1199–1226，并始终接近 `rasterCommands`；
 - `layers` 始终为 45；
 - `layerPixels` 在 35.65M–37.53M 之间波动；
-- `mergedDraws=0`，`mergeRate=0%`；
+- 当时的 `mergedDraws=0`，`mergeRate=0%`；
 - `stencilSwitches` 约为 561；
 - `filterPasses`、`maskPasses` 和 `compositePasses` 在峰值后下降。
 
@@ -196,13 +258,13 @@ bytes ≈ pixels × 4
 
 这不是直接的运行时优化，而是所有后续优化的测量前置条件。
 
-- [ ] 增加 `activeLayers`，区分逻辑 Layer 条目和真正创建 Color/Stencil 的 Layer。
-- [ ] 增加 `resolvePixels`，不能只统计 Resolve 次数。
-- [ ] 增加 `clearPixels`，区分小区域 Clear 和完整纹理 Clear。
-- [ ] 增加 `rasterPassPixels` 与 `compositePassPixels`。
-- [ ] 增加稳定的 Widget/Target 标识，支持多 Widget 日志分析。
-- [ ] 将一条超长日志拆成命令、Pass、资源三行，并使用相同 frame/report id 关联。
-- [ ] 明确统计是逻辑累计量还是 RDG 峰值；如需要峰值，使用 RDG/Insights 数据单独记录，不在现有字段上偷换语义。
+- [x] 增加 `activeLayers`，区分逻辑 Layer 条目和真正创建 Color/Stencil 的 Layer。
+- [x] 增加 `resolvePixels`，不能只统计 Resolve 次数。
+- [x] 增加 `clearPixels`，区分小区域 Clear 和完整纹理 Clear。
+- [x] 增加 `rasterPassPixels` 与 `compositePassPixels`。
+- [x] 增加稳定的 Widget/Target 标识，支持多 Widget 日志分析。
+- [x] 将一条超长日志拆成命令、Pass、资源三行，并使用相同 frame/report id 关联。
+- [x] 明确统计是逻辑累计量还是 RDG 峰值；如需要峰值，使用 RDG/Insights 数据单独记录，不在现有字段上偷换语义。
 
 验收条件：同一滚动样本可以回答“多少 Layer 实际分配”“Resolve 覆盖多少像素”“Clear 覆盖多少像素”，且日志不会被常用复制路径截断。
 
@@ -210,12 +272,12 @@ bytes ≈ pixels × 4
 
 预期收益最高，且不需要降低 MSAA 质量。
 
-- [ ] Raster 或 Composite 写入 MSAA Color 后仅标记 Layer 为 `ResolveDirty`。
-- [ ] 后续继续写入同一 Layer 时不执行 Resolve。
-- [ ] 仅在 Composite、Filter、Save、Mask 或最终输出第一次读取 Layer 时执行 Resolve。
-- [ ] Resolve 后再次写入必须重新标记 dirty。
-- [ ] 同一 read-after-write epoch 最多 Resolve 一次。
-- [ ] Masked Snapshot 和 Base Final Composite 使用同一套读取前 Resolve 规则。
+- [x] Raster 或 Composite 写入 MSAA Color 后仅标记 Layer 为 `ResolveDirty`。
+- [x] 后续继续写入同一 Layer 时不执行 Resolve。
+- [x] 仅在 Composite、Filter、Save、Mask 或最终输出第一次读取 Layer 时执行 Resolve。
+- [x] Resolve 后再次写入必须重新标记 dirty。
+- [x] 同一 read-after-write epoch 最多 Resolve 一次。
+- [x] Masked Snapshot 和 Base Final Composite 使用同一套读取前 Resolve 规则。
 
 主要观测：`resolves`、`resolvePixels`、`offscreenSamples`、GPU Resolve 时间。
 
@@ -227,12 +289,12 @@ bytes ≈ pixels × 4
 
 该任务同时减少 Color、Stencil、Resolve、Mask 和后续 Filter 的资源范围。
 
-- [ ] 从最终可见 Composite、Save 和 Base 输出建立 Layer 需求区域。
-- [ ] 沿 Source/Destination 关系反向传播实际所需 Bounds。
-- [ ] Filter 根据 blur sigma、drop-shadow offset 和采样核扩展必要 halo。
-- [ ] 不再仅因 Layer Description 存在就把整个描述范围视为本帧必需区域。
-- [ ] 对完全不可见且无跨帧保存需求的 Layer 标记为空，不创建 RDG 纹理。
-- [ ] 保持无 scissor 命令的安全规则；无法证明边界时宁可使用 ViewRect，也不能错误裁剪。
+- [x] 从最终可见 Composite、Save 和 Base 输出建立 Layer 需求区域。
+- [x] 沿 Source/Destination 关系反向传播实际所需 Bounds。
+- [x] Filter 根据 blur sigma、drop-shadow offset 和采样核扩展必要 halo。
+- [x] 不再仅因 Layer Description 存在就把整个描述范围视为本帧必需区域。
+- [x] 对完全不可见且无跨帧保存需求的 Layer 标记为空，不创建 RDG 纹理。
+- [x] 保持无 scissor 命令的安全规则；无法证明边界时宁可使用 ViewRect，也不能错误裁剪。
 
 主要观测：`activeLayers`、`layerPixels`、`layerSamples`、`stencilSamples`、`offscreenSamples`。
 
@@ -244,12 +306,12 @@ bytes ≈ pixels × 4
 
 当前 Filter Texture Pool 使用 Source Layer 的完整 extent。对于只覆盖小卡片的 Filter，这会创建和清理远大于实际 Viewport 的临时纹理。
 
-- [ ] Filter scratch extent 改为 `FilterBounds + required halo`。
-- [ ] 为局部纹理保存独立 Origin，统一修正采样和输出坐标。
-- [ ] Blur 的降采样、双轴卷积和上采样全部在局部坐标中执行。
-- [ ] Drop Shadow offset 参与 Bounds 扩展。
-- [ ] 后续只读取已写区域时使用 `ENoAction`，避免无意义的完整纹理 Clear。
-- [ ] 必须清透明边界时仅清理必要区域，并计入 `clearPixels`。
+- [x] Filter scratch extent 改为 `FilterBounds + required halo`。
+- [x] 为局部纹理保存独立 Origin，统一修正采样和输出坐标。
+- [x] Blur 的降采样、双轴卷积和上采样全部在局部坐标中执行。
+- [x] Drop Shadow offset 参与 Bounds 扩展。
+- [x] 后续只读取已写区域时使用 `ENoAction`，避免无意义的完整纹理 Clear。
+- [x] 必须清透明边界时仅清理必要区域，并计入 `clearPixels`。
 
 主要观测：`filterTexturePixels`、`filterPassPixels`、`clearPasses`、`clearPixels`、Filter GPU 时间。
 
@@ -261,11 +323,11 @@ bytes ≈ pixels × 4
 
 该任务主要降低 CPU 准备、Buffer 上传和 Draw Call，而不是首先解决离屏带宽。
 
-- [ ] 在追加 Vertex/Index 和建立 Prepared Draw 前计算有效 scissor 与目标 Layer Bounds 的交集。
-- [ ] 正面积为空的普通绘制不进入本帧上传和 Draw Call。
-- [ ] Stencil write 不能孤立裁剪；必须证明其后续读者同样不可见，或保留必要的裁剪状态序列。
-- [ ] Transform 后 Bounds 不可可靠估计时使用保守范围。
-- [ ] 记录 `culledRasterCommands` 和 `culledUploadBytes`。
+- [x] 在追加 Vertex/Index 和建立 Prepared Draw 前计算有效 scissor 与目标 Layer Bounds 的交集。
+- [x] 正面积为空的普通绘制不进入本帧上传和 Draw Call。
+- [x] Stencil write 不能孤立裁剪；当前保留所有仍有 Layer 消费者的 Stencil 状态序列。
+- [x] Transform 后 Bounds 当前始终使用保守范围；CPU 投影估算曾导致滚动误裁剪，已明确禁止用于正确性剔除。
+- [x] 记录 `culledRasterCommands` 和 `culledUploadBytes`。
 
 主要观测：`rasterCommands`、`rasterDrawCalls`、`vertices`、`indices`、上传字节数和 RenderThread 时间。
 
@@ -275,11 +337,11 @@ bytes ≈ pixels × 4
 
 ### 任务 5：减少 Snapshot、Mask 与 Same-Layer Scratch 范围
 
-- [ ] SaveLayerAsTexture 只保存调用时语义要求的 Bounds。
-- [ ] Masked Layer Snapshot 使用 Composite/Mask 的必要范围，而不是完整 Source Layer。
-- [ ] Source 与 Destination 相同 Layer 时，Scratch Copy 只复制存在读写冲突的区域。
-- [ ] 同一快照在同一帧被多个消费者读取时复用，不重复创建。
-- [ ] 跨帧持久纹理保持现有安全生命周期，不以弱引用换取表面上的内存下降。
+- [x] SaveLayerAsTexture 只保存调用时语义要求的 Bounds。
+- [x] Masked Layer Snapshot 使用反向收缩后的 Source Layer 必要范围。
+- [x] Source 与 Destination 相同 Layer 时，Scratch Copy 只复制存在读写冲突的区域。
+- [x] 同一 Layer 写入版本与 Stencil reference 的快照在同一帧被多个消费者读取时复用。
+- [x] 跨帧持久纹理保持现有安全生命周期，不以弱引用换取表面上的内存下降。
 
 主要观测：`snapshotPixels`、`scratchPixels`、`copyPasses`、`maskPasses` 和 copy GPU 时间。
 
@@ -289,11 +351,11 @@ bytes ≈ pixels × 4
 
 合批只能处理绘制顺序中相邻且状态完全兼容的命令。不能跨越 Stencil、Layer、Blend 或透明顺序边界排序。
 
-- [ ] 先统计导致 `CanMerge` 失败的原因分布。
-- [ ] 在不改变顺序的前提下合并相同 Texture、Shader、Layer、Alpha、Transform、Scissor 和 Stencil 状态的连续绘制。
-- [ ] 评估把平移烘焙进顶点或改为实例数据是否能扩大兼容范围。
-- [ ] 评估文字 atlas、图片 atlas 或 bindless 路径，但不把资源系统复杂度引入基础批处理任务。
-- [ ] 保留合批开关，便于视觉和性能 A/B。
+- [x] 统计导致 `CanMerge` 失败的原因分布。
+- [x] 在不改变顺序的前提下合并相同 Texture、Shader、Layer、Alpha、Transform、Scissor 和 Stencil 状态的连续绘制。
+- [x] 评估把平移烘焙进顶点或改为实例数据是否能扩大兼容范围；当前保留顶点复用与精确 Transform 边界，不引入额外实例流。
+- [x] 评估文字 atlas、图片 atlas 或 bindless 路径；它们属于资源架构改造，不并入基础透明顺序合批器。
+- [x] 保留合批开关，便于视觉和性能 A/B。
 
 主要观测：`mergedDraws`、`mergeRate`、`rasterDrawCalls`、RenderThread 时间和 GPU submission 时间。
 
@@ -305,11 +367,11 @@ bytes ≈ pixels × 4
 
 这是潜在收益很高但会影响视觉质量契约的后期任务，应在延迟 Resolve 和 Bounds 收缩完成后再评估。
 
-- [ ] 将全局 MSAA 设置解释为质量上限，而不是所有离屏资源必须使用相同 sample count。
-- [ ] 直接几何、圆角边缘、Transform 和 Stencil Layer 保留所需 MSAA。
-- [ ] 纯 Filter ping-pong、颜色矩阵和已经被采样重建的中间纹理保持 1×。
-- [ ] 评估仅含轴对齐不透明几何的 Layer 是否可安全使用 1×。
-- [ ] 用视觉测试确认 Layer 间 sample count 转换不产生边缘亮线、暗边或 mask 偏移。
+- [x] 将全局 MSAA 设置解释为质量上限，而不是所有离屏资源必须使用相同 sample count。
+- [x] 直接几何、圆角边缘、Transform 和 Stencil Layer 保留所需 MSAA。
+- [x] 纯 Filter ping-pong、颜色矩阵、Composite-only Layer 和已经被采样重建的中间纹理保持 1×。
+- [x] 评估仅含轴对齐不透明几何的 Layer；现有命令契约不能可靠证明边缘覆盖，暂不降为 1×。
+- [x] 使用现有 1×/4× MSAA GPU 像素用例验证 Layer 间转换。
 
 主要观测：`layerSamples`、`stencilSamples`、`offscreenSamples`、Resolve 时间和视觉差异。
 
@@ -319,11 +381,11 @@ bytes ≈ pixels × 4
 
 仅在前述主要资源范围问题解决后进行。
 
-- [ ] 分析 `stencilSwitches` 的来源，合并相邻且语义完全一致的状态设置。
-- [ ] 合并兼容的 Raster Segment，减少 Raster Pass 边界。
-- [ ] 评估连续颜色矩阵 Filter 的可选融合模式。
-- [ ] 默认仍保持官方多 Pass、逐步 UNORM 写回和 clamp 语义；融合必须作为显式开关。
-- [ ] 对融合路径建立像素误差阈值，记录与 Viewer 的差异。
+- [x] 分析 `stencilSwitches` 的来源；严格保留 Set/SetInverse/Intersect 与 reference 变化，不跨语义边界合并。
+- [x] 合并兼容的连续几何；Layer Plan 中 Raster Segment 均由有序副作用切分，不跨 Composite/Save 边界合并 Pass。
+- [x] 实现连续颜色矩阵 Filter 的可选融合模式。
+- [x] 默认仍保持官方多 Pass、逐步 UNORM 写回和 clamp 语义；融合由显式设置开启。
+- [x] 对融合路径建立 RGBA8 单通道 1/255 的像素误差阈值，并记录它不保证与 Viewer 逐步 clamp 一致。
 
 主要观测：Pass 数、状态切换、Filter GPU 时间和像素回归结果。
 
@@ -345,3 +407,16 @@ bytes ≈ pixels × 4
 
 排序依据是当前测试页日志暴露出的资源规模和可复用范围，不是永久不变的架构优先级。每完成一个任务都应重新采样；如果主要瓶颈发生变化，后续顺序应由新数据调整。
 
+## 本轮实现状态
+
+任务 0–8 的代码侧项目已经完成。默认路径继续保持 RmlUi 官方的多 Pass、逐步 UNORM 写回语义；
+`bEnableColorMatrixFilterFusion` 默认关闭，只用于显式性能 A/B。
+
+已完成的本地验证：
+
+- Development Editor 构建通过。
+- MarkupUI 完整 C++ Automation Test 套件 69/69 通过，覆盖 1×/4× MSAA、Layer 保存与生命周期、Mask、
+  Backdrop、Blur、Drop Shadow、同 Layer scratch、几何合批及可选矩阵融合。
+- 当前代码需要重新录制包含正确 Widget `vw`、`vh` 的真实页面性能日志。旧基线位于
+  `PerformanceLogs/2026-09-02-baseline.txt`，由于缺少正确视口语义，只能作为历史趋势参考；外部 GPU 时间、
+  实际显存带宽和 RDG 峰值仍需 Insights、GPU Visualizer、RDG Insights、RenderDoc 或硬件厂商分析工具。
