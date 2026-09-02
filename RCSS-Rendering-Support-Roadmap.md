@@ -240,7 +240,7 @@ Shader 描述至少需要表达：
   Reimport With New File、Open Source Location 和批量操作。
 - 菜单层不包含 MarkupUI 自定义重导入分发逻辑。
 
-### 任务 0.7：标准化编译几何复用（核心完成，跨帧 Cache 待性能评估）
+### 任务 0.7：标准化编译几何复用（核心完成，跨帧 Cache 未实现）
 
 该任务不增加 RCSS 属性范围，但确保 RmlUi 的 `CompileGeometry` 真正具有跨 Draw 复用语义，
 避免静态页面在命令构造和 Slate 快照阶段反复复制同一份顶点和索引。
@@ -249,7 +249,11 @@ Shader 描述至少需要表达：
 - [x] Pipeline、Draw Command 和 Slate 快照通过共享引用维持异步渲染生命周期。
 - [x] `ReleaseGeometry` 只解除 Pipeline 持有关系，不破坏已提交 Frame。
 - [x] Slate 在单帧聚合 Buffer 中按编译几何去重，相同 Geometry 多次 Draw 只上传一次。
-- [ ] 根据性能统计决定是否增加 Target 侧跨帧持久 GPU Geometry Cache。
+- [ ] 当真实性能采样证明跨帧 Geometry 复用具有显著收益时，实现 Target 侧持久 GPU Geometry Cache，
+  并覆盖资源失效、RHI 重建、显存预算、在途 Frame 和释放时序。
+
+评估结论：**当前决定不实现跨帧持久 GPU Geometry Cache**。现有统计表明几何上传量相对离屏采样量很小，
+其收益优先级低于 Layer、Stencil 和 Filter 带宽优化；该结论不代表任务完成。
 
 验收标准：
 
@@ -524,9 +528,11 @@ Premultiplied Alpha、clip、layer 或 filter 结果。
   并按 Layer、Stencil、Filter 临时纹理、Filter 覆盖区域、Snapshot 和 Scratch 分类统计离屏像素与采样量。
   以上计数由 `r.MarkupUI.RenderStatistics` 输出；模式 `1` 仅在数据变化时报告，模式 `2` 每帧报告。
 - [x] 完成 Layer 反向需求区域传播、Filter halo 扩展、不可见普通几何早期剔除、局部 Filter scratch、
-  延迟 MSAA Resolve、局部 same-layer scratch 和同帧 mask snapshot 复用。
-- [x] 增加 active layer、pass pixel、resolve/clear pixel、剔除上传量、稳定 target/report id 与批处理拒绝原因统计；
-  日志按 commands、passes、resources 三行输出。
+  延迟 MSAA Resolve 和局部 same-layer scratch。
+- [ ] 对相同 Layer 写入版本、Stencil reference、Bounds 和 Snapshot 类型实现同帧 mask snapshot 复用；
+  任一键值变化时必须生成新 Snapshot，并增加命中率与避免复制像素统计。
+- [x] 增加 active layer、pass pixel、resolve/clear pixel、剔除上传量、稳定 target/report id、Base Bounds、
+  Stencil 分配需求与批处理拒绝原因统计；日志按 commands、bounds、passes、resources 四行输出。
 - [ ] 使用 Unreal Insights、RDG Insights 或 RenderDoc 对典型页面采集 CPU 提交时间、GPU 时间和实际显存峰值。
   这些时间与驱动级资源峰值属于外部性能采样，不由同步渲染日志估算。
 - [x] 为普通连续 geometry 建立严格的 batch key，至少包含 texture、shader、blend、stencil、
@@ -536,8 +542,8 @@ Premultiplied Alpha、clip、layer 或 filter 结果。
 - [x] 合并兼容 geometry 的顶点和索引范围，减少 `DrawIndexedPrimitive` 调用与 PSO/资源切换。
   该路径由全局 `FUIRenderingSettings::bEnableGeometryBatching` 控制，当前默认关闭，便于与参考路径
   进行像素和性能 A/B 对比。
-- [x] 根据统计结果决定暂不实现 Target 侧跨帧持久 GPU Geometry Cache：当前几何上传量相对离屏采样量很小，
-  生命周期、失效和显存常驻复杂度的收益优先级低于 Layer/Filter 带宽优化。
+评估结论：**当前决定不实现 Target 侧跨帧持久 GPU Geometry Cache**。该任务仍保持未完成状态，具体实现条件
+和正确性边界见任务 0.7；只有新的性能日志证明几何上传或重复 Geometry Prepare 已成为主要瓶颈时才重新排期。
 - [x] 为批处理前后建立像素一致性测试，并记录合批命中率与拒绝原因；真实页面的 GPU 时间仍由外部采样验证。
 
 #### 遗留优化：连续颜色 Filter 融合
