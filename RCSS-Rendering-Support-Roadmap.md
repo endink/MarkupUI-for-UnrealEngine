@@ -11,27 +11,26 @@
 
 ## 当前结论
 
-当前插件的 RCSS 解析、层叠、选择器和布局能力主要由完整的 RmlUi 6.3 核心提供，完成度较高；普通几何、字体、图片、矩形裁剪、stencil clip、预乘 Alpha 混合和 GPU 透视变换已经可用。高级视觉回调已经进入 typed 通用命令协议，并建立 Target 能力、失败契约和跨线程 Render Health；默认 Slate Target 已执行 RDG layer、Blend/Replace composite、全部基础颜色 filter、Gaussian blur 和 drop-shadow，并支持将 Layer 保存为同帧或跨帧可采样纹理或 alpha mask；尚未实现的 backdrop-filter、gradient 与自定义 shader 能力会明确拒绝。
+当前插件的 RCSS 解析、层叠、选择器和布局能力由完整的 RmlUi 6.3 核心提供。默认 Slate Target 已真实执行普通几何、字体、图片、scissor、stencil clip、预乘 Alpha、GPU 透视变换、RDG layer、Blend/Replace composite、保存纹理与 alpha mask、全部内置 filter、backdrop-filter、box-shadow 和六种内置 gradient。阶段 1–11 的视觉测试已与 RmlUi Document Viewer 对齐；当前明确未实现的视觉扩展仅剩自定义 `decorator: shader(...)`。
 
 当前完成度估计：
 
 | 范围 | 完成度 |
 | --- | ---: |
-| RCSS 解析、层叠、选择器、布局 | 90–95% |
-| 普通几何、字体、图片、scissor | 90–95% |
-| 精确基础渲染语义 | 85–90% |
-| 内置高级视觉效果 | 60–70% |
-| RmlUi 6.3 完整视觉后端 | 约 70–75% |
+| RCSS 解析、层叠、选择器、布局 | 由 RmlUi 6.3 核心完整提供 |
+| 普通几何、字体、图片、scissor | 已完成 |
+| 精确基础渲染语义 | 已完成并完成视觉对比 |
+| RmlUi 6.3 内置高级视觉效果 | 已完成并完成视觉对比 |
+| 自定义 Shader Decorator | 未实现 |
+| 形式化 RCSS 一致性测试套件 | 尚未建立，不能据此宣称绝对 100% |
 
 当前里程碑状态：
 
-- 已关闭：任务 0.1–0.6、任务 0.8、阶段 2 Layer 合成、阶段 3 Layer 保存与跨帧资源生命周期、阶段 4 基础颜色 Filter、阶段 5 Blur 与 Drop Shadow、阶段 6 Filter 与 Backdrop Filter 调度。
+- 已关闭：任务 0.1–0.6、任务 0.8、阶段 1–11。
 - 核心完成但保留后期优化：任务 0.7 编译几何复用。
-- 部分完成：阶段 1 Layer 生命周期、阶段 7 Mask Image、阶段 8 Box Shadow、阶段 12 视觉回归。
-- 下一项功能主线：阶段 7 Mask Image 组合行为。
+- 当前功能主线：阶段 12 渲染性能分析与连续几何批处理。
 
-架构重构已经承载首批高级 RCSS 像素能力：局部离屏 Layer、Blend/Replace composite、opacity
-filter、基础颜色矩阵 filter、Gaussian blur、drop-shadow、Layer 保存和 alpha mask 已进入真实 RDG 执行；后续主要缺口转为 backdrop、模糊 box-shadow 验证、复杂 mask 组合和 gradient。
+架构重构已经承载 RCSS 高级像素能力：局部离屏 Layer、Blend/Replace composite、颜色与空间 filter、backdrop-filter、Layer 保存、alpha mask、box-shadow 和六种内置 gradient 已进入真实 RDG 执行。资源路径完整性已经关闭，后续主要功能缺口转为生命周期与视觉回归收尾，以及最后阶段的自定义 Shader Decorator。
 
 ## 当前实现校对
 
@@ -57,8 +56,8 @@ filter、基础颜色矩阵 filter、Gaussian blur、drop-shadow、Layer 保存�
 ### 尚未完成的高级像素执行
 
 Pipeline 已能记录完整逻辑描述和操作顺序。默认 Slate Target 当前真实执行 bounded RDG layer、
-Blend/Replace composite、source-layer stencil 裁剪快照、全部基础颜色 filter、Gaussian blur、drop-shadow、保存纹理和保存 alpha mask；
-其他尚未实现的 filter 与 shader 请求仍返回失败，不再退化成普通 geometry 或产生“成功但无效果”的伪 handle。
+Blend/Replace composite、source-layer stencil 裁剪快照、全部内置 filter、保存纹理、保存 alpha mask，以及 linear、radial、conic 和对应 repeating gradient。
+尚未注册的自定义 shader 请求仍返回失败，不会退化成普通 geometry 或产生“成功但无效果”的伪 handle。
 
 默认 Slate 普通 geometry 像素着色器仍然只有以下语义：
 
@@ -66,13 +65,7 @@ Blend/Replace composite、source-layer stencil 裁剪快照、全部基础颜色
 return Input.Color * Texture.Sample(TextureSampler, Input.UV);
 ```
 
-因此以下 RCSS 能力尚未完成：
-
-- linear、radial、conic 及 repeating gradient
-- 自定义 `decorator: shader(...)`
-- `backdrop-filter`
-- 模糊或依赖离屏 layer 的 `box-shadow`
-- mask 与 scissor、圆角 clip、transform 的复杂组合
+因此当前主要尚未完成的 shader 能力是自定义 `decorator: shader(...)`；内置 gradient 已使用独立像素着色路径执行。
 
 ## 对旧结论的修正
 
@@ -80,7 +73,7 @@ return Input.Color * Texture.Sample(TextureSampler, Input.UV);
 
 标准 ResourceHost 当前同时注册 Core Style 字体、磁盘和 Unreal Asset Provider。磁盘模式已经能读取普通文件、字体、PNG、JPEG 等资源，不再局限于 Unreal Asset。
 
-Unreal Asset 模式目前仍只接受 `/Game/` 和 `/Engine/`，尚未普遍支持插件内容挂载点。
+Unreal Asset 模式支持配置项目或插件内容挂载点作为资产资源根目录。磁盘与资产资源域均限制在各自配置的根目录内，且不会自动跨域回退查找。
 
 ### Clip mask 已完成基础语义
 
@@ -304,7 +297,12 @@ Shader 描述至少需要表达：
   只有 save 结果 extraction 为跨帧 `IPooledRenderTarget`。详见
   [Slate RDG Layer 执行与资源复用设计](Slate-RDG-Layer-Design.md)。
 - [x] 按设计建立 Target 侧 RDG Layer executor；不重复实现 RDG 已有的帧内纹理池。
-- [ ] 支持窗口 resize、DPI 改变、Target 销毁和 RHI 资源重建。
+- [x] 支持窗口 resize、DPI 改变和 Target 销毁；Pipeline 只在 viewport 或 pixel ratio 实际变化时更新 Frontend，
+  Target 的弱引用失效后停止生成新 Frame，已提交 Frame 继续由 RenderThread 安全消费。
+- [x] 支持 RHI 资源失效与重建协调。进程级 `FRenderResource` 先推进 packed generation token，再通过
+  弱监听表让插件 GPU 资源释放自身 backing；Target 通过非阻塞 RenderThread barrier 确认恢复，Pipeline
+  统一协调 Frontend 与 Target 重建，旧 token 的在途 Slate Frame 在进入 RDG 前整帧跳过。详见
+  [RHI 资源生命周期开发设计](RHI-Resource-Lifecycle.md)。
 
 验收标准：
 
@@ -433,70 +431,60 @@ RmlUi 已经通过 layer 和 composite 调用顺序描述调度，Target 应忠�
 - 全功能测试页 B01–B03 已完成 UE 与 RmlUi Document Viewer 对比，背景过滤、前景隔离、圆角 blur
   和多 Filter 顺序的视觉结果一致。
 - GPU Automation Test 已覆盖前景隔离、不同输入/输出区域和 Backdrop 多 Filter 顺序。
-- 2026-09-02 使用无参数默认模式执行完整插件 C++ 测试集：发现 44 项，44 项成功，0 项失败。
+- 2026-09-02 使用无参数默认模式执行完整插件 C++ 测试集：发现 63 项，63 项成功，0 项失败。
 
-### 阶段 7：Mask Image
+### 阶段 7：Mask Image（已完成）
 
 - [x] 将 mask decorator 绘制到临时 layer。
 - [x] `SaveLayerAsMaskImage()` 生成 mask filter。
 - [x] 使用 mask filter 的 alpha 通道合成元素内容 layer。
 - [x] 多个 mask decorator 由 RmlUi 绘制到同一个 mask layer 后生成单一快照。
 - [x] mask 明确只使用保存图像的 alpha 通道；RGB 不参与遮罩权重。
-- [ ] mask 与 scissor、圆角 clip、transform 同时使用时保持正确。
+- [x] mask 与 scissor、圆角 clip、transform 同时使用时保持正确（M03–M09，UE 与 RmlUi Viewer 对比通过）。
 
-### 阶段 8：Box Shadow
+### 阶段 8：Box Shadow（已完成）
 
 - [x] 验证无 blur 的 inset/outset shadow（L04、L05，UE 与 RmlUi Viewer 对比通过）。
-- [ ] 验证带 blur 的 inset/outset shadow。
+- [x] 验证带 blur 的 inset/outset shadow（S01–S03，UE 与 RmlUi Viewer 对比通过）。
 - [x] 验证多重 sharp shadow 顺序（L06）。
 - [x] 验证 shadow texture 的跨帧缓存与释放（L06 视觉验证与 GPU Automation Test）。
 
 不应在 UE 侧另写一套 box-shadow 语义。Layer、blur、clip、save texture 和 composite 完整后，应让 RmlUi 已生成的 shadow geometry 自然工作。
 
-### 阶段 9：内置 Gradient Shader
+### 阶段 9：内置 Gradient Shader（已完成）
 
-- [ ] linear-gradient
-- [ ] repeating-linear-gradient
-- [ ] radial-gradient
-- [ ] repeating-radial-gradient
-- [ ] conic-gradient
-- [ ] repeating-conic-gradient
-- [ ] color stop 数量上限及超限行为
-- [ ] premultiplied color interpolation
-- [ ] 不同 Target 对 gradient 描述的一致解释
+- [x] linear-gradient
+- [x] repeating-linear-gradient
+- [x] radial-gradient
+- [x] repeating-radial-gradient
+- [x] conic-gradient
+- [x] repeating-conic-gradient
+- [x] color stop 数量上限及超限行为：与参考后端一致，最多使用前 16 个 stop。
+- [x] premultiplied color interpolation
+- [x] Pipeline 生成 Target 无关的标准 gradient 描述；默认 Slate Target 已按该描述执行。
+- [x] 六种 Gradient GPU Automation Test 与 Pipeline 参数标准化测试。
+- [x] G01–G06 完成 UE 与 RmlUi Viewer 的人工视觉对比，结果一致。
 
 颜色 stop 可通过 structured buffer 或受控上限的 shader 参数传递。
 
-### 阶段 10：自定义 Shader Decorator
+### 阶段 10：资源路径完整性（已完成）
 
-`decorator: shader(...)` 的字符串内容由渲染后端解释，不等价于自动执行任意 Web shader。UE 侧需要一个显式扩展注册机制，例如：
+- [x] Unreal Asset Provider 支持项目与插件内容挂载点作为 `AssetResourceRootDirectory`。
+- [x] 磁盘与资产相对路径均不能逃出各自配置的资源根目录；绝对磁盘路径、UNC 与 URI Scheme 会被拒绝。
+- [x] RML `<link>` 以及 RCSS 内字体、图片等嵌套引用统一相对于直接引用者解析。
+- [x] Unreal Asset 与磁盘资源分别保持独立资源域；`url()` 不会跨域回退查找。
+- [x] 资源根目录在文档 Context 创建时固定；设置变化仅影响新建或 Full Reload 后的 Context，正在显示的 Context 不会被静默切换。
+- [x] 自动化测试覆盖根路径、相对路径、嵌套引用、目录逃逸、外部路径拒绝、插件 Mount Point 与资源域隔离。
 
-```cpp
-RegisterDrawShader(
-    TEXT("creation"),
-    MakeShared<FCreationDrawShader>());
-```
+RmlUi 6.3 不提供 CSS `@import`；外部样式表通过 RML `<link type="text/rcss">` 引用。
 
-- [ ] 定义通用 shader provider/registry 接口。
-- [ ] 内置或示例实现 RmlUi 参考后端的 `creation` shader。
-- [ ] 未注册 shader 返回 `0`。
-- [ ] 明确自定义 shader 能访问的纹理、尺寸和参数类型。
-
-### 阶段 11：资源路径完整性
-
-- [ ] Unreal Asset Provider 支持插件内容挂载点，或明确限制并输出诊断。
-- [ ] 限制磁盘相对路径逃出 RootDirectory，或明确允许策略。
-- [ ] 测试 `@import` 的相对路径、嵌套和循环。
-- [ ] 测试不同资源来源下的 `url()`。
-- [ ] 定义资源热更新和失效策略。
-
-### 阶段 12：视觉回归与生命周期测试
+### 阶段 11：视觉回归与生命周期测试
 
 至少建立以下截图或像素对比用例：
 
 - [x] premultiplied alpha 半透明边缘（A01–A03）
 - [x] 连续圆角 clip（C01–C02）
-- [ ] inverse clip
+- [x] inverse clip（C03、S02）
 - [x] intersect clip（C02）
 - [x] 二维 transform（T04）
 - [x] 透视 transform（T01–T03）
@@ -506,34 +494,46 @@ RegisterDrawShader(
 - [x] drop-shadow（F11）
 - [x] backdrop-filter（B01–B03，UE 与 Viewer 视觉一致；GPU Automation Test）
 - [x] 基础 mask-image（L07、L08）
-- [ ] inset/outset box-shadow
-- [ ] 六种 gradient
+- [x] inset/outset box-shadow（S01–S03）
+- [x] 六种 gradient（G01–G06，UE 与 RmlUi Viewer 视觉一致；GPU Automation Test）
 - [x] layer Blend（L01–L03）
 - [x] layer Replace（GPU Automation Test）
 - [x] source layer 与 destination layer 相同（1× scratch-copy 与 4× MSAA）
 - [x] Save 后同帧作为纹理绘制，且保存后修改源 Layer 不污染快照（1× 与 4× MSAA）
 - [x] 保存纹理在下一帧继续使用
-- [ ] 多 Widget、多 Context
+- [x] 多 Widget、多 Context；两个真实 `FRmlLanguageFrontend` 分别创建 Context、加载 Document 并通过独立
+  Pipeline/Target 生成 Frame，关闭第一个 Context 不影响第二个继续更新和绘制。
 - [x] Target 资源表销毁时 RenderThread Frame 尚未消费资源快照
-- [ ] resize、DPI 改变和窗口销毁
-- [ ] RHI 资源重建
+- [x] 文档关闭时已提交的 Slate 绘制仍在 RenderThread 等待消费
+- [x] resize、DPI 改变和窗口销毁；自动化测试覆盖初始 viewport、无变化去重、尺寸与 pixel ratio 更新、
+  零尺寸拒绝、Target 弱引用失效以及在途 Frame 的资源寿命。
+- [x] RHI 资源失效与重建协调；自动化测试覆盖 Unavailable、Recovering、Ready、新代次单次失效、
+  恢复确认帧跳过和下一帧恢复。真实 GPU Device Removed 的进程内恢复仍由 Unreal 平台能力决定。
 - [x] 在途 Frame 尚未消费时 `ReleaseTexture`
-- [x] mask-image `ReleaseFilter`（普通 compiled filter 无 GPU backing；`ReleaseShader` 仍待 shader 阶段）
+- [x] mask-image `ReleaseFilter` 与 Gradient `ReleaseShader`；已提交 Frame 继续持有执行所需快照。
 
-### 阶段 13：渲染性能分析与连续几何批处理
+### 阶段 12：渲染性能分析与连续几何批处理
 
 该阶段只在像素语义和视觉回归稳定后进行，不能为减少 Draw Call 改变 RmlUi 原始绘制顺序、
 Premultiplied Alpha、clip、layer 或 filter 结果。
 
-- [ ] 分别统计 command 数、raster draw call、texture switch、shader switch、stencil state switch、
-  layer 数、composite pass 数和 offscreen pixel 数，避免仅用 command 总数判断 GPU 压力。
-- [ ] 为普通连续 geometry 建立严格的 batch key，至少包含 texture、shader、blend、stencil、
+- [x] 分别统计 command 数、合批前后 raster draw、geometry 实例/复用、顶点与索引上传量、
+  texture/shader/stencil state switch、layer 数和逻辑 composite 数，避免仅用 command 总数判断 GPU 压力。
+- [x] 从真实 RDG 调度点统计 raster、composite、filter、mask、copy、clear pass 与 resolve 操作，
+  并按 Layer、Stencil、Filter 临时纹理、Filter 覆盖区域、Snapshot 和 Scratch 分类统计离屏像素与采样量。
+  以上计数由 `r.MarkupUI.RenderStatistics` 输出；模式 `1` 仅在数据变化时报告，模式 `2` 每帧报告。
+- [ ] 使用 Unreal Insights、RDG Insights 或 RenderDoc 对典型页面采集 CPU 提交时间、GPU 时间和实际显存峰值。
+  这些时间与驱动级资源峰值属于外部性能采样，不由同步渲染日志估算。
+- [x] 为普通连续 geometry 建立严格的 batch key，至少包含 texture、shader、blend、stencil、
   scissor、transform、目标 layer 和纹理 Alpha 语义。
-- [ ] 只合并命令流中相邻且 batch key 完全兼容的 geometry，不跨越 clip mask、layer、composite、
+- [x] 只合并命令流中相邻且 batch key 完全兼容的 geometry，不跨越 clip mask、layer、composite、
   filter 或其他顺序屏障重新排序。
-- [ ] 合并兼容 geometry 的顶点和索引范围，减少 `DrawIndexedPrimitive` 调用与 PSO/资源切换。
+- [x] 合并兼容 geometry 的顶点和索引范围，减少 `DrawIndexedPrimitive` 调用与 PSO/资源切换。
+  该路径由全局 `FUIRenderingSettings::bEnableGeometryBatching` 控制，当前默认关闭，便于与参考路径
+  进行像素和性能 A/B 对比。
 - [ ] 根据统计结果决定是否实现 Target 侧跨帧持久 GPU Geometry Cache。
 - [ ] 为批处理前后建立像素一致性测试，并记录典型普通页面与全功能测试页的 Draw Call 降幅。
+  已加入严格 batch key 自动化测试和开启合批后的 GPU 像素测试；真实页面降幅与 GPU 时间仍待采样。
 
 #### 遗留优化：连续颜色 Filter 融合
 
@@ -563,6 +563,18 @@ RenderPass 数量和 fullscreen draw call，尤其有利于大量元素串联多
 - 开启批处理后，现有视觉回归结果不发生像素差异。
 - L01–L03 等 Layer/Filter 用例的命令顺序和 pass 边界不被合并破坏。
 - 性能文档同时报告 CPU 提交时间、Draw Call、离屏像素和 GPU 时间，不以单一指标宣称优化完成。
+
+### 阶段 13：自定义 Shader Decorator
+
+自定义 `decorator: shader(...)` 是完成 RmlUi 内置 RCSS 语义后的最后一项扩展功能，不阻塞内置 RCSS
+完整支持的完成判定。其字符串内容由渲染后端解释，不等价于自动执行任意 Web shader。
+
+- [ ] 定义 Engine 级 shader provider/registry 公共扩展契约。
+- [ ] 内置或示例实现 RmlUi 参考后端的 `creation` shader。
+- [ ] 未注册 shader 明确失败，不退化为普通 geometry。
+- [ ] 明确自定义 shader 可使用的纹理、尺寸、时间和参数类型。
+- [ ] 明确 Shader Platform、Cook、模块注册和注销规则。
+- [ ] 建立参数校验、GPU 像素、在途 Frame 与模块生命周期测试。
 
 ## 推荐实施顺序
 
@@ -597,13 +609,13 @@ RenderPass 数量和 fullscreen draw call，尤其有利于大量元素串联多
   ↓
 9 Gradient
   ↓
-10 自定义 Shader
+10 资源路径完整性
   ↓
-11 资源路径完整性
+11 生命周期与自动化视觉回归收尾
   ↓
-12 自动化视觉回归
+12 性能分析与连续几何批处理
   ↓
-13 性能分析与连续几何批处理
+13 自定义 Shader Decorator
 ```
 
 ## 完成定义

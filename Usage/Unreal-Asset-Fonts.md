@@ -47,14 +47,22 @@ body {
 /Game/Assets/MarkupUI/DingTalkJinBu.DingTalkJinBu
 ```
 
-也可以显式使用 `/Game` 绝对资产路径：
+也可以使用相对于 `AssetResourceRootDirectory` 的根路径。假设资产资源根目录配置为：
+
+```text
+/Game/Assets/MarkupUI
+```
+
+则可以这样声明：
 
 ```css
 @font-face {
     font-family: "DingTalk JinBu Test";
-    src: "/Game/Assets/MarkupUI/DingTalkJinBu.ttf";
+    src: "/DingTalkJinBu.ttf";
 }
 ```
+
+`/` 表示配置的 MarkupUI 资产资源根目录，不表示 Unreal 的全局 `/Game` 路径。完整规则请参阅[资源路径与根目录](Resource-Paths.md)。
 
 建议让 Font Face 的资产名与源字体文件名一致。这样 RCSS 可以继续使用熟悉的 `.ttf` 或 `.otf` URI，同时稳定地映射到同名 Unreal 资产。
 
@@ -139,7 +147,7 @@ em {
 /Game/UI/Fonts/MyFont-BoldItalic.MyFont-BoldItalic
 ```
 
-如果 RCSS 不在该目录中，则使用相对于 RCSS 的路径或 `/Game/UI/Fonts/...` 绝对资产路径。
+如果 RCSS 不在该目录中，则使用相对于 RCSS 的路径，或者使用相对于 `AssetResourceRootDirectory` 的根路径，例如 `/Fonts/MyFont-Regular.ttf`。
 
 ## `UFont` 为什么不能直接替代 `UFontFace`
 
