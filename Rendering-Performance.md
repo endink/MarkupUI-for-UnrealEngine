@@ -49,6 +49,9 @@ r.MarkupUI.RenderStatistics 1
 | `target` | 当前绘制目标在本次进程中的诊断标识 | 多个 Widget 同时输出日志时用于分组；不要把它当作跨进程稳定 ID |
 | `vw` | 当前 Draw Target 的实际像素视口宽度 | Slate Widget 中对应 Widget 视口，而不是窗口或 BackBuffer 宽度 |
 | `vh` | 当前 Draw Target 的实际像素视口高度 | 视口不同的原始像素、采样和带宽压力数据不能直接横向比较 |
+| `msaaSamples` | 本次执行使用的 MarkupUI MSAA sample count | A/B 对比时必须保持一致 |
+| `geometryBatching` | 相邻几何合批开关，`1` 为开启，`0` 为关闭 | 不再依赖文件名或拒绝计数反推测试配置 |
+| `colorMatrixFusion` | 连续颜色矩阵融合开关，`1` 为开启，`0` 为关闭 | 开启后不再保证 Viewer 的逐 Pass UNORM clamp 语义 |
 
 比较两份日志时，应先按 `target` 分组，再只比较 `vw × vh` 相同的报告。若必须比较不同分辨率，至少同时观察按视口面积归一化后的指标，例如：
 
@@ -62,10 +65,12 @@ normalizedOffscreenSamples = offscreenSamples / (vw × vh)
 | --- | --- | --- |
 | `commands` | 本帧通用 Draw Command List 中的全部命令数，包含 raster、layer、composite、save 等命令 | 判断前端生成的总命令规模；它不等于 Draw Call |
 | `rasterCommands` | 进入可见性裁剪和相邻合批前的 raster 源命令数量 | 与 `culledRasterCommands`、`rasterDrawCalls` 一起观察 |
-| `rasterDrawCalls` | 可见性裁剪和相邻合批后保留的普通 raster draw 数量 | 接近普通几何绘制调用数；不包含合成期间为裁剪产生的附加绘制 |
-| `mergedDraws` | `max(rasterCommands - rasterDrawCalls, 0)` | 当前名称沿用历史约定；数值同时包含早期裁剪和相邻合批消除的 draw，不是纯合批数量 |
-| `mergeRate` | `mergedDraws / rasterCommands` | 当前表示总体 draw 压缩率，不能单独作为合批命中率 |
 | `culledRasterCommands` | 在上传顶点和索引前被证明不可见的普通绘制数量 | 滚动后应随不可见章节增加；Stencil 状态序列采用保守保留规则 |
+| `preparedRasterCommands` | 可见性裁剪后、相邻合批前保留的普通 raster 命令数量 | 正常情况下等于 `rasterCommands - culledRasterCommands` |
+| `rasterDrawCalls` | 实际加入 RDG Raster Pass 的普通 Draw 与 clip-mask replay Draw 总数 | 用于观察真实调度的几何 Draw Call；不包含 Composite fullscreen triangle |
+| `clipReplayDrawCalls` | `rasterDrawCalls` 中为 Composite 重建目标 Stencil 而追加的 Draw Call | 可从总数中分离裁剪链 replay 成本 |
+| `mergedDraws` | 合批器实际成功吸收到前一个 Draw 的普通命令数量 | 由合批器直接累计，不包含早期裁剪 |
+| `mergeRate` | `mergedDraws / preparedRasterCommands` | 表示合批对裁剪后普通命令的实际 Draw Call 降幅 |
 | `culledUploadBytes` | 被早期剔除的几何原本需要上传的逻辑字节数 | 用于估算 CPU 准备和上传节省趋势，不等于总线实测带宽 |
 | `batchRejectClip` | 因裁剪写入模式不兼容而未合批的相邻 draw 数量 | 判断裁剪写入是否为主要边界 |
 | `batchRejectTextureShader` | 因纹理、纹理 Alpha 模式或 Shader 不兼容而未合批的相邻 draw 数量 | 判断 atlas 或材质状态是否限制合批 |
@@ -74,16 +79,19 @@ normalizedOffscreenSamples = offscreenSamples / (vw × vh)
 | `batchRejectStencil` | 因 Stencil 读取状态或 reference 不兼容而未合批的相邻 draw 数量 | 复杂嵌套裁剪中通常较高 |
 | `batchRejectOther` | 因 Layer、Blend 或其他兼容条件未通过而未合批的相邻 draw 数量 | 用于覆盖上述类别之外的合批边界 |
 
-若要从当前日志近似分离纯合批数量，应使用：
+以下关系可用于检查统计是否自洽：
 
 ```text
-estimatedBatchedDraws = max(mergedDraws - culledRasterCommands, 0)
-estimatedBatchRate = estimatedBatchedDraws / max(rasterCommands - culledRasterCommands, 1)
+preparedRasterCommands = rasterCommands - culledRasterCommands
+normalRasterDrawCalls = rasterDrawCalls - clipReplayDrawCalls
+mergeRate = mergedDraws / max(preparedRasterCommands, 1)
 ```
 
-这是根据现有计数关系得到的诊断值，不是日志直接输出字段。
+`rasterDrawCalls` 还包含 `clipReplayDrawCalls`，因此不能再用 `rasterCommands - rasterDrawCalls` 推导合批数量。
+合批成功数和实际执行的 replay Draw 均由执行路径直接记录。
 
-当 `rasterCommands` 和 `rasterDrawCalls` 在滚动过程中几乎不变时，说明不可见页面内容仍然进入 Target 的几何准备和绘制流程。此时应优先检查可见性裁剪，而不是先扩大合批规则。
+当 `preparedRasterCommands` 和 `normalRasterDrawCalls` 在滚动过程中几乎不变时，说明不可见页面内容仍然进入
+Target 的几何准备和绘制流程。此时应优先检查可见性裁剪，而不是先扩大合批规则。
 
 ### 几何复用与上传
 
@@ -107,7 +115,8 @@ estimatedBatchRate = estimatedBatchedDraws / max(rasterCommands - culledRasterCo
 | `shaderSwitches` | 相邻 draw 的 shader handle 发生变化的次数 | 判断渐变、普通纹理和其他 Shader 路径的切换密度 |
 | `stencilSwitches` | clip write、clip operation、stencil reference 或 clip read 状态发生变化的次数 | 高值通常来自复杂嵌套裁剪；不能为了降低数字而改变绘制顺序或裁剪语义 |
 
-这些字段在每个 Raster Segment 开始时重新建立相邻关系，因此不统计 Segment 之间的边界切换。
+这些字段只累计实际加入 RDG 的 Raster Segment，并在每个 Segment 开始时重新建立相邻关系，因此不统计
+Segment 之间的边界切换。合批拒绝原因同样只来自实际执行的 Segment；关闭合批时所有拒绝计数均为零。
 
 ### Layer 与逻辑合成
 
@@ -207,6 +216,11 @@ logicalBytesPerSecond ≈ logicalBytesPerFrame × frameRate
 
 `PerformanceLogs/2026-09-02-baseline.txt` 是优化前的一次页面滚动历史样本。该日志生成时 `vw`、`vh` 尚未记录 Widget 实际视口，因此只能用于观察同一份日志内部的阶段变化，不能依靠其中的视口字段与新日志做归一化对比。
 
+`PerformanceLogs/2026-09-02_22-31-00-no-batch.txt` 与
+`PerformanceLogs/2026-09-02_22-35-41-batch.txt` 使用修正前的合批统计公式：其中 `mergedDraws` 错误包含
+`culledRasterCommands`，且两次录制的主要视口高度分别为 1271 和 1304。它们只能作为历史录制保留，不能作为
+正式的合批 A/B 结论。修正统计后必须在相同视口、DPI、页面状态和滚动路线下重新录制两条基线。
+
 该样本从页面顶部滚动到底部，共 96 帧，呈现以下阶段：
 
 | 阶段 | Raster Pass | Composite | Filter | Mask | Clear | Resolve | Filter Texture Pixels |
@@ -265,6 +279,10 @@ logicalBytesPerSecond ≈ logicalBytesPerFrame × frameRate
 - [x] 增加稳定的 Widget/Target 标识，支持多 Widget 日志分析。
 - [x] 将一条超长日志拆成命令、Pass、资源三行，并使用相同 frame/report id 关联。
 - [x] 明确统计是逻辑累计量还是 RDG 峰值；如需要峰值，使用 RDG/Insights 数据单独记录，不在现有字段上偷换语义。
+- [x] 将早期裁剪与真实合批成功数分离，`mergedDraws` 不再通过源命令数和 Draw Call 数反推。
+- [x] 将实际执行的 clip-mask replay 纳入 `rasterDrawCalls`，并通过 `clipReplayDrawCalls` 单独报告。
+- [x] 合批拒绝原因与状态切换只累计实际加入 RDG 的 Raster Segment。
+- [x] 在日志中显式记录 MSAA sample count、几何合批和颜色矩阵融合开关。
 
 验收条件：同一滚动样本可以回答“多少 Layer 实际分配”“Resolve 覆盖多少像素”“Clear 覆盖多少像素”，且日志不会被常用复制路径截断。
 
