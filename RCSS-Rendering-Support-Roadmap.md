@@ -28,8 +28,8 @@
 
 - 已关闭：任务 0.1–0.6、任务 0.8、阶段 1–11。
 - 核心完成但保留后期优化：任务 0.7 编译几何复用。
-- 阶段 12 的代码侧优化与自动化验证已完成；真实页面 GPU 时间仍待固定场景外部采样。
-- 当前功能主线：阶段 13 自定义 Shader Decorator。
+- 阶段 12 的代码侧优化与自动化验证已完成；阶段 13 将建立 Unreal Insights 与 GPU 性能可观测性。
+- 最后的功能主线：阶段 14 自定义 Shader Decorator。
 
 架构重构已经承载 RCSS 高级像素能力：局部离屏 Layer、Blend/Replace composite、颜色与空间 filter、backdrop-filter、Layer 保存、alpha mask、box-shadow 和六种内置 gradient 已进入真实 RDG 执行。资源路径完整性已经关闭，后续主要功能缺口转为生命周期与视觉回归收尾，以及最后阶段的自定义 Shader Decorator。
 
@@ -526,15 +526,15 @@ Premultiplied Alpha、clip、layer 或 filter 结果。
   texture/shader/stencil state switch、layer 数和逻辑 composite 数，避免仅用 command 总数判断 GPU 压力。
 - [x] 从真实 RDG 调度点统计 raster、composite、filter、mask、copy、clear pass 与 resolve 操作，
   并按 Layer、Stencil、Filter 临时纹理、Filter 覆盖区域、Snapshot 和 Scratch 分类统计离屏像素与采样量。
-  以上计数由 `r.MarkupUI.RenderStatistics` 输出；模式 `1` 仅在数据变化时报告，模式 `2` 每帧报告。
+  以上计数由 `r.MarkupUI.PerformanceLog` 输出；模式 `1` 仅在数据变化时报告，模式 `2` 每帧报告。
 - [x] 完成 Layer 反向需求区域传播、Filter halo 扩展、不可见普通几何早期剔除、局部 Filter scratch、
   延迟 MSAA Resolve 和局部 same-layer scratch。
 - [ ] 对相同 Layer 写入版本、Stencil reference、Bounds 和 Snapshot 类型实现同帧 mask snapshot 复用；
   任一键值变化时必须生成新 Snapshot，并增加命中率与避免复制像素统计。
 - [x] 增加 active layer、pass pixel、resolve/clear pixel、剔除上传量、稳定 target/report id、Base Bounds、
   Stencil 分配需求与批处理拒绝原因统计；日志按 commands、bounds、passes、resources 四行输出。
-- [ ] 使用 Unreal Insights、RDG Insights 或 RenderDoc 对典型页面采集 CPU 提交时间、GPU 时间和实际显存峰值。
-  这些时间与驱动级资源峰值属于外部性能采样，不由同步渲染日志估算。
+- [ ] 使用 Unreal Insights、RDG Insights 或 RenderDoc 对典型页面采集 CPU 提交时间、GPU 时间和实际显存峰值；
+  该工作已拆分为阶段 13，详细任务见 [Rendering-Stat-Profiling.md](Rendering-Stat-Profiling.md)。
 - [x] 为普通连续 geometry 建立严格的 batch key，至少包含 texture、shader、blend、stencil、
   scissor、transform、目标 layer 和纹理 Alpha 语义。
 - [x] 只合并命令流中相邻且 batch key 完全兼容的 geometry，不跨越 clip mask、layer、composite、
@@ -576,7 +576,19 @@ RenderPass 数量和 fullscreen draw call，尤其有利于大量元素串联多
 - L01–L03 等 Layer/Filter 用例的命令顺序和 pass 边界不被合并破坏。
 - 性能文档同时报告 CPU 提交时间、Draw Call、离屏像素和 GPU 时间，不以单一指标宣称优化完成。
 
-### 阶段 13：自定义 Shader Decorator
+### 阶段 13：Unreal Insights 与 GPU 性能可观测性
+
+该阶段不继续增加推测性渲染优化，而是建立 CPU、RenderThread、RHI 和 GPU 的真实计时证据。完整规范与
+任务清单见 [Rendering-Stat-Profiling.md](Rendering-Stat-Profiling.md)。
+
+- [ ] 固定静止、滚动、动画与 Filter 活跃场景的可重复采样基线。
+- [ ] 为 Frontend、Pipeline、Layer Plan、Bounds、命令准备、上传准备和 RDG 调度加入 CPU Trace Scope。
+- [ ] 为 Raster、Composite、Filter、Blur、Shadow、Backdrop、Mask、Copy 和 Resolve 加入稳定 GPU Scope。
+- [ ] 将高价值逻辑指标接入 Trace Counter，并使用 `report`、`target`、视口和 MSAA 关联同一次执行。
+- [ ] 使用 Unreal Insights、GPU Visualizer 和 RenderDoc 验证 Scope 层级、计时与 Trace 开销。
+- [ ] 只有真实热点证据支持时才恢复性能优化任务；硬件带宽、Occupancy 与 Cache 结论使用 PIX、Nsight 或 RGP。
+
+### 阶段 14：自定义 Shader Decorator
 
 自定义 `decorator: shader(...)` 是完成 RmlUi 内置 RCSS 语义后的最后一项扩展功能，不阻塞内置 RCSS
 完整支持的完成判定。其字符串内容由渲染后端解释，不等价于自动执行任意 Web shader。
@@ -627,7 +639,9 @@ RenderPass 数量和 fullscreen draw call，尤其有利于大量元素串联多
   ↓
 12 性能分析与连续几何批处理
   ↓
-13 自定义 Shader Decorator
+13 Unreal Insights 与 GPU 性能可观测性
+  ↓
+14 自定义 Shader Decorator
 ```
 
 ## 完成定义

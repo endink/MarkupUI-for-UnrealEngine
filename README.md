@@ -95,6 +95,7 @@ Unreal Engine UI
 - [使用 Unreal 资产字体](Usage/Unreal-Asset-Fonts.md)
 - [RCSS 渲染支持完成度与开发路线](RCSS-Rendering-Support-Roadmap.md)
 - [渲染性能诊断与优化路线](Rendering-Performance.md)
+- [渲染 Stat 与性能分析路线](Rendering-Stat-Profiling.md)
 - [Slate RDG Layer 执行与资源复用设计](Slate-RDG-Layer-Design.md)
 - [色彩空间与 Alpha 契约](Color-Space-and-Alpha-Contract.md)
 - [设计讨论归档](Discussions/README.md)

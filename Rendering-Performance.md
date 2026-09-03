@@ -2,7 +2,7 @@
 
 ## 文档目标
 
-本文是 MarkupUI 的内部开发文档，用于解释 `r.MarkupUI.RenderStatistics` 输出的每个字段、建立一致的日志分析方法，并记录按预期收益排序的渲染优化任务。
+本文是 MarkupUI 的内部开发文档，用于解释 `r.MarkupUI.PerformanceLog` 输出的每个字段、建立一致的日志分析方法，并记录按预期收益排序的渲染优化任务。
 
 统计日志描述的是一次 Unreal RDG 绘制执行的逻辑工作量和资源规模。它适合发现异常趋势、比较改动前后差异，但不能单独替代 Unreal Insights、GPU Visualizer、RDG Insights 或 RenderDoc 的真实时间和带宽测量。
 
@@ -11,7 +11,7 @@
 在 Unreal Editor 的控制台中输入：
 
 ```text
-r.MarkupUI.RenderStatistics 1
+r.MarkupUI.PerformanceLog 1
 ```
 
 支持以下模式：
@@ -24,10 +24,22 @@ r.MarkupUI.RenderStatistics 1
 
 模式 `1` 使用进程内上一条统计结果进行比较。多个 MarkupUI Widget 同时绘制时，不同 Widget 的结果可能交替出现，应使用 `target` 区分绘制目标。
 
-性能数据行统一以 `[MarkupUI Statistics]` 开头。当前每份报告由 `commands`、`bounds`、
-`antialiasing`、`passes` 和 `resources` 五行组成，五行共享相同的 `report`、`target`、`vw` 和 `vh`。
-复制或解析日志时必须保留并合并同一 `report` 的全部行，不能把其中一行当作完整报告。旧基线可能只有
-`commands`、`bounds`、`passes` 和 `resources` 四行；分析脚本继续接受这种旧格式，但不会为它推导抗锯齿诊断。
+性能数据行统一以 `[MarkupUI Statistics]` 开头。当前每份报告由 `commands`、`bounds`、`passes` 和
+`resources` 四行组成，四行共享相同的 `report`、`target`、`vw` 和 `vh`。复制或解析日志时必须保留并
+合并同一 `report` 的全部行，不能把其中一行当作完整报告。分析脚本仍可读取曾包含
+`category=antialiasing` 的历史实验日志，但该分类不属于当前统计契约。
+
+当前四类字段分布如下：
+
+| 分类 | 当前字段 |
+| --- | --- |
+| `commands` | 配置开关、命令与 Draw Call 数、裁剪与合批结果、几何复用与上传量、状态切换和合批拒绝原因 |
+| `bounds` | Base Layer 的声明范围、需求传播范围、实际分配范围及可见区域状态 |
+| `passes` | Layer/Composite 数量、各类 RDG Pass、Stencil Draw/Clear、Resolve 及各 Pass 覆盖面积 |
+| `resources` | Layer、Stencil、Filter、Snapshot、Scratch 和总离屏纹理的像素或 sample slot 规模 |
+
+已删除的 `adaptiveMSAA`、所有 `aa*` 字段和 `category=antialiasing` 只属于自适应 MSAA 实验。它们可能出现在
+历史日志中，但当前日志没有这些字段是正常结果，不应据此检查渲染源码或报告统计缺失。
 
 ## 统计边界
 
@@ -53,7 +65,6 @@ r.MarkupUI.RenderStatistics 1
 | `vw` | 当前 Draw Target 的实际像素视口宽度 | Slate Widget 中对应 Widget 视口，而不是窗口或 BackBuffer 宽度 |
 | `vh` | 当前 Draw Target 的实际像素视口高度 | 视口不同的原始像素、采样和带宽压力数据不能直接横向比较 |
 | `msaaSamples` | 本次执行使用的 MarkupUI MSAA sample count | A/B 对比时必须保持一致 |
-| `adaptiveMSAA` | Raster Layer 内容自适应 MSAA 开关，`1` 表示允许经证明不需要边缘 AA 的 Layer 使用 1× | 位于 `category=antialiasing`；旧日志没有该字段 |
 | `geometryBatching` | 相邻几何合批开关，`1` 为开启，`0` 为关闭 | 不再依赖文件名或拒绝计数反推测试配置 |
 | `colorMatrixFusion` | 连续颜色矩阵融合开关，`1` 为开启，`0` 为关闭 | 开启后不再保证 Viewer 的逐 Pass UNORM clamp 语义 |
 
@@ -176,40 +187,6 @@ Segment 之间的边界切换。合批拒绝原因同样只来自实际执行的
 
 分析顺序建议为：先看每类 Pass 数，再看对应像素范围。仅减少 Pass 数但扩大覆盖范围，可能使总成本反而上升。
 
-### 抗锯齿需求
-
-`category=antialiasing` 独立记录每个有效 Layer 是否必须使用多采样，以及实际 Prepared Draw 触发该结论的原因。
-这些字段描述的是保守的边缘覆盖判定，不是对最终图像质量的评分。
-
-全局 `msaaSamples` 始终是上限。若插件设置选择 1×，required 和 optional Layer 都强制使用 1×；自适应逻辑
-不会把它们提升到 2×/4×。此时 AA 分类仍然输出，用来标记当前 1× 策略下哪些内容理论上需要边缘 AA。
-
-| 字段 | 含义 | 诊断方式 |
-| --- | --- | --- |
-| `adaptiveMSAA` | 是否启用 Raster Layer 内容自适应 MSAA | `0` 时所有 Layer 仍按全局 `msaaSamples` 分配，但 required/optional 统计仍用于估算潜在命中范围 |
-| `aaRequiredLayers` | 至少包含一个需要采样边缘覆盖的 Draw，或需要 Clip Mask replay 的有效 Layer 数量 | 开启自适应后这些 Layer 保持全局 Sample Count |
-| `aaOptionalLayers` | 所有直接 Raster Draw 均证明不需要采样边缘覆盖的有效 Layer 数量 | 开启自适应后这些 Layer 使用 1×；Composite-only Layer 也属于此类 |
-| `aaRequiredPixels` | `aaRequiredLayers` 的 Bounds 面积总和 | 与 `aaOptionalPixels` 一起判断实际资源收益，不要只比较 Layer 数量 |
-| `aaOptionalPixels` | `aaOptionalLayers` 的 Bounds 面积总和 | 表示可以安全使用 1× 的像素范围，不等于已经节省的物理带宽 |
-| `aaGeometryEdgeDraws` | 边界包含非水平或非垂直边，或无法证明边界安全的 Prepared Draw 数量 | 常见于圆角、多边形和其他生成几何边缘 |
-| `aaTransformDraws` | 使用任意非 Identity 2D 或 3D Transform 的 Prepared Draw 数量 | Translate、Scale、Rotate、Skew、Yaw、Pitch、Roll、Perspective 均保守要求 AA |
-| `aaClipMaskDraws` | 写入或读取 Clip Mask 的 Prepared Draw 数量 | Stencil Set、SetInverse、Intersect、裁剪内容和 Clip replay 都要求 AA |
-| `aaPixelMisalignedDraws` | 几何边界不能证明落在一致整数像素位置的 Prepared Draw 数量 | 包含分数像素平移、边界顶点像素偏移不一致等情况 |
-
-同一 Draw 可以同时满足多个原因，因此四个 `aa*Draws` 不能相加后与 `rasterDrawCalls` 比较。合批后的一个
-Prepared Draw 会保留被合并 Draw 的全部原因，所以这些计数描述实际提交批次的原因分布，而不是前端源命令数量。
-
-内容自适应命中率建议按面积优先计算：
-
-```text
-aaOptionalLayerShare = aaOptionalLayers / (aaRequiredLayers + aaOptionalLayers)
-aaOptionalPixelShare = aaOptionalPixels / (aaRequiredPixels + aaOptionalPixels)
-```
-
-`aaOptionalPixelShare` 比 Layer 数更能说明潜在收益。一个完整视口的 required Layer 可能远大于多个小型
-optional Layer。比较开关前后时还必须保持 `vw`、`vh`、`msaaSamples`、页面状态和滚动路线一致，并同时观察
-`layerSamples`、`stencilSamples`、`resolvePixels` 与视觉回归结果。
-
 ### Layer、Stencil 与 MSAA
 
 | 字段 | 含义 | 是否包含 Sample Count |
@@ -267,7 +244,7 @@ Blur 的实际纹理采样数会受到 sigma、降采样层级和每轴采样核
 `offscreenSamples ≈ 5.5 × viewportPixels` 表示离屏纹理的逻辑 sample slot 总量，不表示 GPU 每帧实际读写了
 5.5 次完整视口。Fast Clear、Tile Cache、RDG Pass 合并、附件压缩和具体 GPU 架构都会影响真实物理流量。
 
-在 2× MSAA 下，一个覆盖视口且确实需要 Stencil 的 AA-required 基础 Layer 通常包含以下逻辑资源：
+在 2× MSAA 下，一个覆盖视口且确实需要 Stencil 的基础 Layer 通常包含以下逻辑资源：
 
 | 资源 | 每视口像素的 sample slot 数 |
 | --- | ---: |
@@ -281,9 +258,8 @@ Blur 的实际纹理采样数会受到 sigma、降采样层级和每轴采样核
 重复绘制、异常带宽或待优化问题。只有 GPU 时间、硬件带宽计数器、Pass 覆盖范围或严格 A/B 测试证明这里是
 实际瓶颈时，才应针对它制定优化任务；不能仅凭 `offscreenSamples / (vw × vh)` 的倍数得出优化结论。
 
-当前按需分配和内容自适应路径会让不需要 Stencil 的 Layer 省去 Depth/Stencil，让 AA-optional Layer 使用 1×
-Color 且不创建 Resolve。因此新日志不再预期固定接近 `5×`；应结合 `category=antialiasing`、Stencil 字段和
-各类 sample 统计解释变化。
+当前 Stencil 按需分配会让不需要裁剪的 Layer 省去 Depth/Stencil。所有 Raster Layer 的采样数严格服从
+全局 `msaaSamples`；应结合 Stencil 字段和各类 sample 统计解释资源变化。
 
 ## 带宽压力估算
 
@@ -382,7 +358,7 @@ logicalBytesPerSecond ≈ logicalBytesPerFrame × frameRate
 - [x] 增加 `clearPixels`，区分小区域 Clear 和完整纹理 Clear。
 - [x] 增加 `rasterPassPixels` 与 `compositePassPixels`。
 - [x] 增加稳定的 Widget/Target 标识，支持多 Widget 日志分析。
-- [x] 将一条超长日志拆成命令、Bounds、抗锯齿、Pass、资源五类，并使用相同 frame/report id 关联。
+- [x] 将一条超长日志拆成命令、Bounds、Pass、资源四类，并使用相同 frame/report id 关联。
 - [x] 明确统计是逻辑累计量还是 RDG 峰值；如需要峰值，使用 RDG/Insights 数据单独记录，不在现有字段上偷换语义。
 - [x] 将早期裁剪与真实合批成功数分离，`mergedDraws` 不再通过源命令数和 Draw Call 数反推。
 - [x] 将实际执行的 clip-mask replay 纳入 `rasterDrawCalls`，并通过 `clipReplayDrawCalls` 单独报告。
@@ -390,10 +366,9 @@ logicalBytesPerSecond ≈ logicalBytesPerFrame × frameRate
 - [x] 在日志中显式记录 MSAA sample count、几何合批和颜色矩阵融合开关。
 - [x] 增加 Base Layer 的 `declaredBounds`、`requiredBounds`、`allocatedBounds` 与可见区域状态，定位无 Scissor 回退和 Composite 反向传播导致的范围扩张。
 - [x] 增加 Stencil 实际分配、语义需求、像素范围、Draw Call 与 Attachment Clear 统计，为按需分配建立基线。
-- [x] 增加 AA required/optional Layer、像素范围和四类重叠原因统计，为内容自适应 MSAA 建立可归因数据。
 
 验收条件：同一滚动样本可以回答“多少 Layer 实际分配 Color/Stencil”“Resolve 覆盖多少像素”“Clear
-覆盖多少像素”“哪些 Layer 可以安全使用 1×”，并能通过相同 `report` 合并五类日志。
+覆盖多少像素”，并能通过相同 `report` 合并四类日志。
 
 ### 任务 1：Layer 延迟 Resolve 与 Dirty Tracking
 
@@ -520,25 +495,17 @@ Source Layer extent 而异常放大；Filter 视觉结果必须与 Viewer 一致
 
 ### 任务 7：Raster Layer 内容自适应 MSAA
 
-状态：**已完成保守的整 Layer 自适应路径**。
+状态：**评估后决定不实现，实验代码已回退**。
 
-- [x] 将全局 MSAA 设置解释为质量上限，而不是所有离屏资源必须使用相同 sample count。
-- [x] 编译几何记录边界是否轴对齐、边界顶点是否具有一致像素偏移等不可变事实。
-- [x] 每个 Prepared Draw 统一分类 Geometry Edge、Transform、Clip Mask 和 Pixel Misalignment AA 需求。
-- [x] 只要一个直接 Draw 需要 AA，整个 Layer 保持全局 sample count；只有全部 Draw 均证明安全时才使用 1×。
-- [x] 任意非 Identity 2D/3D Transform、Clip Mask 写入/读取和 Clip replay 均保守要求 AA。
-- [x] 不含 Raster Draw 的 Composite-only Layer 使用 1×，且 Source Layer 的 AA 需求不传播到 Destination。
-- [x] Filter ping-pong、颜色矩阵、Snapshot、Scratch 和其他采样后处理纹理保持 1×。
-- [x] 增加独立 `category=antialiasing` 统计和 1×/4× GPU 像素回归。
+曾实现整 Layer 的保守分流：分析编译几何边界、Transform、像素对齐和 Clip Mask，只在整个 Layer 都被证明
+不需要采样边缘覆盖时降到 1×。实际页面没有形成稳定的资源收益，却增加了几何编译成本、逐帧分类成本、
+统计复杂度和视觉回归风险，因此当前版本不保留该路径。
 
-当前限制：没有在同一 Layer 内建立不同 SampleCount 的局部区域；无法证明边界安全的几何会产生保守的
-false positive 并继续使用 MSAA。当前也不会根据纹理内容猜测透明 padding 是否足以替代几何边缘覆盖。
+所有有效 Raster Layer 现在统一使用插件设置中的全局 1×、2× 或 4×。Filter ping-pong、颜色矩阵、Snapshot、
+Scratch 等本身不需要几何边缘覆盖的采样后处理纹理仍保持单采样，这不属于自适应 MSAA。
 
-开关关闭时，所有有效 Layer 继续使用全局 sample count，但 AA required/optional 统计仍然输出，便于做严格 A/B。
-
-主要观测：`layerSamples`、`stencilSamples`、`offscreenSamples`、Resolve 时间和视觉差异。
-
-验收条件：在不降低测试页视觉一致性的前提下减少 sample slot 总量；不得以全局关闭 MSAA 作为任务完成标准。
+只有未来 GPU 工具证明 MSAA Raster Layer 是真实瓶颈，并且代表性页面存在大面积、可稳定证明安全的完整 Layer，
+才重新评估此任务；不得仅凭静态几何分类或 sample slot 估算重新开启。
 
 ### 任务 8：可选连续颜色矩阵融合
 
@@ -600,8 +567,8 @@ false positive 并继续使用 MSAA。当前也不会根据纹理内容猜测透
 - [ ] 保持透明顺序、Clip Mask、Filter、Composite 和 Resolve 语义不变。
 - [ ] 证明新增 RenderTarget、Composite 和同步成本低于减少的 sample slot 成本。
 
-当前决定：**不实现**。整 Layer 自适应已经覆盖低风险命中；局部拆分会增加资源、Pass 与合成边界，只有新日志
-证明大面积 Layer 长期因少量 AA Draw 被迫保留 MSAA，并且 GPU 工具确认它是实际瓶颈时才重新评估。
+当前决定：**不实现**。整 Layer 自适应实验没有证明稳定收益；局部拆分还会进一步增加资源、Pass 与合成边界。
+只有 GPU 工具确认 MSAA 是实际瓶颈，并且能证明局部方案的收益覆盖新增成本时才重新评估。
 
 ### 未完成 5：默认路径的状态与 Pass 优化
 
@@ -622,7 +589,7 @@ false positive 并继续使用 MSAA。当前也不会根据纹理内容猜测透
 | 4 | Raster 早期裁剪 | 已完成保守实现 | 降低 Draw Call、上传和 RenderThread 工作 | 高 |
 | 5 | Snapshot/Mask/Scratch 收缩 | 部分完成 | 减少复制和临时纹理 | 中 |
 | 6 | 严格相邻几何合批 | 基础实现已完成 | 在严格兼容时降低 Draw Call | 中高 |
-| 7 | Raster Layer 内容自适应 MSAA | 已完成保守整 Layer 分流 | 安全 Layer 使用 1×，其余保持全局质量 | 中 |
+| 7 | Raster Layer 内容自适应 MSAA | 评估后不实现，实验代码已回退 | 当前没有可验证的稳定收益 | 中高 |
 | 8 | 可选颜色矩阵融合 | 可选路径已完成 | 显式 A/B 时减少颜色 Filter Pass | 高，可能改变 Viewer 一致性 |
 | 9 | Stencil 按需分配 | 已完成 | 避免无裁剪 Layer 的 Stencil 资源与 Clear | 中 |
 
@@ -641,15 +608,14 @@ false positive 并继续使用 MSAA。当前也不会根据纹理内容猜测透
 ## 本轮实现状态
 
 任务 0–4 已完成当前定义的保守实现；任务 5 仍缺少同帧 Snapshot 复用；任务 6 完成严格相邻合批，但扩大
-兼容范围尚未实现；任务 7 完成保守的整 Layer 内容自适应 MSAA；任务 8 只完成默认关闭的可选颜色矩阵融合；
+兼容范围尚未实现；任务 7 经实验后决定不实现并已回退；任务 8 只完成默认关闭的可选颜色矩阵融合；
 任务 9 完成 Stencil 按需分配。默认 Filter 路径继续保持 RmlUi 官方的多 Pass、逐步 UNORM 写回语义。
 
 已完成的本地验证：
 
 - Development Editor 构建通过。
-- MarkupUI 完整 C++ Automation Test 套件 79/79 通过，覆盖 AA 原因分类、整 Layer 自适应 1×/4× 路径、
-  Layer 保存与生命周期、Mask、Backdrop、Blur、Drop Shadow、同 Layer scratch、几何合批及可选矩阵融合。
-- 当前旧格式基线为 `PerformanceLogs/2026-09-03_00-47-31-baseline.txt`，包含 Bounds、Stencil 和四类统计行，
-  可用于后续相同视口、DPI、页面状态与滚动路线下的严格 A/B；外部 GPU 时间、实际显存带宽和 RDG 峰值
-  仍需 Insights、GPU Visualizer、RDG Insights、RenderDoc 或硬件厂商分析工具。它不包含新
-  `category=antialiasing`，因此不能用于分析 AA 命中率；需要用当前版本重新录制五类统计的新基线。
+- MarkupUI 完整 C++ Automation Test 套件 70/70 通过，覆盖 Layer 保存与生命周期、Mask、Backdrop、Blur、
+  Drop Shadow、同 Layer scratch、几何合批及可选矩阵融合。
+- 历史性能日志可能包含已移除的 `category=antialiasing` 实验字段，只能用于回顾实验结论，不能作为当前
+  运行时统计契约。外部 GPU 时间、实际显存带宽和 RDG 峰值仍需 Insights、GPU Visualizer、RDG Insights、
+  RenderDoc 或硬件厂商分析工具。
