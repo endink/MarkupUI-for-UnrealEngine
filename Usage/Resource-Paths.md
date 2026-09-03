@@ -9,7 +9,7 @@ MarkupUI 使用与 HTML/CSS 相近的资源路径规则。相对路径相对于�
 MarkupUI 提供两个相互独立的资源根目录：
 
 - `AssetResourceRootDirectory`：Unreal 资产文档使用的资源根目录；
-- `DiskResourceRootDirectory`：磁盘文件文档使用的资源根目录。
+- `DesignResourceRootDirectory`：设计文件及磁盘资源使用的根目录。
 
 资源域由入口文档的加载方式确定：
 
@@ -90,7 +90,7 @@ RCSS 加载后，其中的字体和图片路径继续相对于该 RCSS 自身所
 
 因此，`/Game/a.png` 不会绕过配置直接访问 Unreal 的 `/Game/a`。
 
-当 `DiskResourceRootDirectory` 为 `D:/Project/MarkupUIResources` 时：
+当 `DesignResourceRootDirectory` 为 `D:/Project/MarkupUIResources` 时：
 
 ```text
 /images/logo.png -> D:/Project/MarkupUIResources/images/logo.png
@@ -111,7 +111,7 @@ RCSS 加载后，其中的字体和图片路径继续相对于该 RCSS 自身所
 
 ```text
 AssetResourceRootDirectory = /Game/UI
-DiskResourceRootDirectory  = D:/Project/MarkupUIResources
+DesignResourceRootDirectory = D:/Project/MarkupUIResources
 ```
 
 并假设正在进行资源引用的 RCSS 分别位于：
@@ -134,7 +134,7 @@ UE 资产：/Game/UI/styles/pages/MainStyle
 | 磁盘文件 | `/images/logo.png` | `D:/Project/MarkupUIResources/images/logo.png` | ✅ |  |
 | 磁盘文件 | `C:\External\secret.png` | `C:/External/secret.png` | ❌ | URI 直接指定了磁盘绝对路径。 |
 | 磁盘文件 | `//server/share/secret.png` | `//server/share/secret.png` | ❌ | URI 直接指定了 UNC 网络路径。 |
-| 磁盘文件 | `file:///C:/External/secret.png` | `C:/External/secret.png` | ❌ | 不允许使用 `file://` 绕过磁盘资源根目录。 |
+| 磁盘文件 | `file:///C:/External/secret.png` | `C:/External/secret.png` | ❌ | 不允许使用 `file://` 绕过设计资源根目录。 |
 
 ### 示例 2：重新解释 Unreal Mount Point 形式
 
