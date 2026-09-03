@@ -1,5 +1,7 @@
 # MarkupUI for Unreal Engine
 
+![MarkupUI 使用预览](preview.jpg)
+
 > 让 RML/RCSS 的表达力，成为 Unreal Engine 原生 UI 工作流的一部分。
 
 MarkupUI 是一个面向 Unreal Engine 的运行时与编辑器插件，将 [RmlUi](https://github.com/mikke89/RmlUi) 的 HTML/CSS 风格界面系统带入 Unreal，并以原生 Slate 为落点完成绘制、输入和资源协作。它希望为游戏 UI 提供一种更接近“文档 + 样式”的创作方式：界面结构清晰、样式可复用、交互语义明确，同时保有 Unreal 工程所需要的性能、资源生命周期与渲染可靠性。
