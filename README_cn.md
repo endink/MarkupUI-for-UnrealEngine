@@ -8,7 +8,7 @@
   一个为 Unreal Engine 提供 HTML 与 CSS 风格 UI 创作体验的插件。
   <br>
   <br>
-  <a href="#概览"><img alt="Unreal Engine UI" src="https://img.shields.io/badge/Unreal%20Engine"></a>
+  <a href="#概览"><img alt="Unreal Engine UI" src="https://img.shields.io/badge/Unreal%20Engine-1C2A45"></a>
 </p>
 <p align="center">
   <a href="#概览">概览</a>
