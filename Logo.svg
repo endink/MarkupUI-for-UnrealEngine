@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>MarkupUI logo</title>
+  <desc>Cyan markup brackets surrounding two friendly eye marks, on a dark rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="66" y1="48" x2="448" y2="474" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#162A45"/>
+      <stop offset="1" stop-color="#07111F"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="102" y1="128" x2="412" y2="391" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#83D7FF"/>
+      <stop offset=".48" stop-color="#55B7FF"/>
+      <stop offset="1" stop-color="#5277FF"/>
+    </linearGradient>
+    <filter id="glow" x="66" y="80" width="380" height="352" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#background)"/>
+  <rect x="25" y="25" width="462" height="462" rx="111" stroke="#8AD9FF" stroke-opacity=".18" stroke-width="2"/>
+
+  <!-- Markup brackets frame a pair of interface-like eyes. -->
+  <g stroke="url(#accent)" stroke-width="29" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M134 174 62 256l72 82"/>
+    <path d="m378 174 72 82-72 82"/>
+  </g>
+  <g filter="url(#glow)">
+    <ellipse cx="211" cy="256" rx="31" ry="38" fill="url(#accent)"/>
+    <ellipse cx="301" cy="256" rx="31" ry="38" fill="url(#accent)"/>
+  </g>
+  <circle cx="211" cy="261" r="15" fill="#07111F"/>
+  <circle cx="301" cy="261" r="15" fill="#07111F"/>
+  <circle cx="219" cy="251" r="5" fill="#D6F3FF"/>
+  <circle cx="309" cy="251" r="5" fill="#D6F3FF"/>
+</svg>
