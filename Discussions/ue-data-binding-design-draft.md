@@ -1120,27 +1120,27 @@ void UpdateInventory(
 
 | 函数 | 作用 |
 | --- | --- |
-| MarkupUI::NotifyPropertyChanged(UObject* Object, FName MemberName) | 通知普通属性变化；数组或字典进行清空、排序、交换、反转或打乱等整体变更后，也使用此函数。 |
+| MarkupUI::NotifyPropertyChanged(Object, MemberName) | 通知普通属性变化；数组或字典进行清空、排序、交换、反转或打乱等整体变更后，也使用此函数。 |
 
 #### Array 函数
 
 | 函数 | 作用 |
 | --- | --- |
-| MarkupUI::NotifyArrayAdded(UObject* Object, FName MemberName, int32 Index) | 通知在末尾添加了一个元素。 |
-| MarkupUI::NotifyArrayAppended(UObject* Object, FName MemberName, int32 NewCount) | 通知在末尾追加了多个元素。 |
-| MarkupUI::NotifyArrayInserted(UObject* Object, FName MemberName, int32 Index, int32 Count) | 通知从指定索引插入了一个或多个元素。 |
-| MarkupUI::NotifyBeginArrayDelete(UObject* Object, FName MemberName, int32 Index) | 在删除指定索引处元素前调用。 |
-| MarkupUI::NotifyEndArrayDelete(UObject* Object, FName MemberName) | 删除完成后调用。 |
-| MarkupUI::NotifyBeginArrayReplace(UObject* Object, FName MemberName, int32 Index) | 在替换指定索引处元素前调用。 |
-| MarkupUI::NotifyEndArrayReplace(UObject* Object, FName MemberName) | 替换完成后调用。 |
+| MarkupUI::NotifyArrayAdded(Object, MemberName, Index) | 通知在末尾添加了一个元素。 |
+| MarkupUI::NotifyArrayAppended(Object, MemberName, NewCount) | 通知在末尾追加了多个元素。 |
+| MarkupUI::NotifyArrayInserted(Object, MemberName, Index, Count) | 通知从指定索引插入了一个或多个元素。 |
+| MarkupUI::NotifyBeginArrayDelete(Object, MemberName, Index) | 在删除指定索引处元素前调用。 |
+| MarkupUI::NotifyEndArrayDelete(Object, MemberName) | 删除完成后调用。 |
+| MarkupUI::NotifyBeginArrayReplace(Object, MemberName, Index) | 在替换指定索引处元素前调用。 |
+| MarkupUI::NotifyEndArrayReplace(Object, MemberName) | 替换完成后调用。 |
 
 #### Map 函数
 
 | 函数 | 作用 |
 | --- | --- |
-| MarkupUI::NotifyMapAdded(UObject* Object, FName MemberName, const FMarkupValue& Key) | 通知新增了指定键。 |
-| MarkupUI::NotifyMapReplaced(UObject* Object, FName MemberName, const FMarkupValue& Key) | 通知替换了指定键对应的值。 |
-| MarkupUI::NotifyMapRemoved(UObject* Object, FName MemberName, const FMarkupValue& Key) | 通知移除了指定键。 |
+| MarkupUI::NotifyMapAdded(Object, MemberName, Key) | 通知新增了指定键。 |
+| MarkupUI::NotifyMapReplaced(Object, MemberName, Key) | 通知替换了指定键对应的值。 |
+| MarkupUI::NotifyMapRemoved(Object, MemberName, Key) | 通知移除了指定键。 |
 
 例如，已有业务接口修改受保护属性后，可直接通知：
 
