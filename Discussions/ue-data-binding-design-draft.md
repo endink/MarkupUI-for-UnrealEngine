@@ -608,18 +608,18 @@ protected:
 
 ### 宏总表
 
-| 构造函数登记语句 | 类定义宏 | 解决的问题 | 是否可被反射/蓝图复用 |
-| --- | --- | --- | --- |
-| `RegisterProperty(TEXT("Name"), NameProperty, &Class::GetName, &Class::SetName)` | `MARKUP_PROPERTY(Type, Name[, DefaultValue])` | 生成受保护的属性字段、Getter、Setter；构造函数登记读写属性。 | 是；反射层可将其描述为普通字段。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, &Class::GetName)` | `MARKUP_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 生成受保护的属性字段和公开 Getter；不生成 Setter；构造函数登记只读属性。 | 是。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, &Class::GetName, &Class::SetName)` | `MARKUP_OBJECT_PROPERTY(Type, Name[, DefaultValue])` | 声明并登记嵌套对象属性。 | 是。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, &Class::GetName)` | `MARKUP_OBJECT_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 声明并登记只读嵌套对象属性；不生成 Setter。 | 是。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, nullptr, &Class::SetName)` | `MARKUP_OBJECT_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 声明并登记仅可替换整个对象的属性；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, &Class::GetName, &Class::SetName)` | `MARKUP_ARRAY_PROPERTY(Type, Name[, DefaultValue])` | 声明并登记受管集合属性。 | 是。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, &Class::GetName)` | `MARKUP_ARRAY_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 声明并登记只读受管集合属性；不生成 Setter。 | 是。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, nullptr, &Class::SetName)` | `MARKUP_ARRAY_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 声明并登记仅可替换整个受管数组的属性；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
-| `RegisterProperty(TEXT("Name"), NameProperty, nullptr, &Class::SetName)` | `MARKUP_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 生成受保护的属性字段和公开 Setter；不生成 Getter，并登记只写属性。 | 是；可映射到反射 Setter 或蓝图函数。 |
-| `RegisterCommand(TEXT("name"), SelectItemCommand)` | `FMarkupCommand SelectItemCommand = FMarkupCommand::FromMember(...)` | 声明成员函数命令，并在构造函数中登记。 | 是；可映射到 `UFUNCTION`。 |
+| 类定义宏 | 解决的问题 | 是否可被反射/蓝图复用 |
+| --- | --- | --- |
+| `MARKUP_PROPERTY(Type, Name[, DefaultValue])` | 生成受保护的属性字段、Getter、Setter。 | 是；反射层可将其描述为普通字段。 |
+| `MARKUP_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 生成受保护的属性字段和公开 Getter；不生成 Setter。 | 是。 |
+| `MARKUP_OBJECT_PROPERTY(Type, Name[, DefaultValue])` | 声明嵌套对象属性。 | 是。 |
+| `MARKUP_OBJECT_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 声明只读嵌套对象属性；不生成 Setter。 | 是。 |
+| `MARKUP_OBJECT_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 声明仅可替换整个对象的属性；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
+| `MARKUP_ARRAY_PROPERTY(Type, Name[, DefaultValue])` | 声明受管集合属性。 | 是。 |
+| `MARKUP_ARRAY_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 声明只读受管集合属性；不生成 Setter。 | 是。 |
+| `MARKUP_ARRAY_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 声明仅可替换整个受管数组的属性；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
+| `MARKUP_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 生成受保护的属性字段和公开 Setter；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
+| `FMarkupCommand SelectItemCommand = FMarkupCommand::FromMember(...)` | 声明成员函数命令。 | 是；可映射到 `UFUNCTION`。 |
 
 `RegisterProperty` 与 `RegisterCommand` **只能写在派生类自己的构造函数体内**，不能写在普通成员函数、静态函数或类定义体中。类定义宏**只能写在类定义体内**，不能写进构造函数体或任何普通函数体。所有类定义属性宏的末尾可选参数都是 `DefaultValue`；它必须与属性类型匹配，且始终位于最后。两者刻意分离：前者完成运行时登记，后者声明 C++ 属性接口。
 
