@@ -1142,7 +1142,7 @@ void UpdateInventory(
 | MarkupUI::NotifyMapReplaced(Object, MemberName, Key) | 通知替换了指定键对应的值。 |
 | MarkupUI::NotifyMapRemoved(Object, MemberName, Key) | 通知移除了指定键。 |
 
-** 注意：**
+**注意**
 
  - 单步通知函数：（没有 `Begin` / `End`）更新结束后调用。
  - 两步通知函数： `Begin` / `End` 成对出现的通知函数：应该再更新数据前调用 `Begin`, 更新完成后调用 `End`， 
