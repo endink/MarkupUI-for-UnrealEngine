@@ -1063,29 +1063,29 @@ Map 变更节点同样必须能够追溯到具体 `UObject` 上的 Map 属性；
 
 | 宏 | 作用 |
 | --- | --- |
-| `MARKUP_PROPERTY_SET(Object, Member, Value)` | 写入普通属性；值实际变化后通知该属性。 |
-| `MARKUP_NOTIFY_PROPERTY_CHANGED(Object, Member)` | 属性已经由业务代码写入后，通知该属性。 |
+| MARKUP_PROPERTY_SET(Object, Member, Value) | 写入普通属性；值实际变化后通知该属性。 |
+| MARKUP_NOTIFY_PROPERTY_CHANGED(Object, Member) | 属性已经由业务代码写入后，通知该属性。 |
 
 ### 数组宏
 
 | 宏 | 作用 |
 | --- | --- |
-| `MARKUP_ARRAY_ADD(Object, Member, Item)` | 在末尾添加元素，并记录新增变更。 |
-| `MARKUP_ARRAY_ADD_UNIQUE(Object, Member, Item)` | 不存在相同元素时添加，并记录新增变更。 |
-| `MARKUP_ARRAY_APPEND(Object, Member, AppendedItems)` | 追加传入集合中的元素，并记录新增变更。 |
-| `MARKUP_ARRAY_INSERT(Object, Member, Item, Index)` | 在指定位置插入元素，并记录插入变更。 |
-| `MARKUP_ARRAY_REMOVE_AT(Object, Member, Index)` | 移除指定索引的元素，并记录删除变更。 |
-| `MARKUP_ARRAY_REMOVE_ITEM(Object, Member, Item)` | 移除匹配元素，并记录删除变更。 |
-| `MARKUP_ARRAY_REPLACE(Object, Member, Index, Item)` | 替换指定索引的元素，并记录替换变更。 |
-| `MARKUP_ARRAY_RESIZE(Object, Member, Size)` | 调整数组长度，并记录新增或删除变更。 |
+| MARKUP_ARRAY_ADD(Object, Member, Item) | 在末尾添加元素，并记录新增变更。 |
+| MARKUP_ARRAY_ADD_UNIQUE(Object, Member, Item) | 不存在相同元素时添加，并记录新增变更。 |
+| MARKUP_ARRAY_APPEND(Object, Member, AppendedItems) | 追加传入集合中的元素，并记录新增变更。 |
+| MARKUP_ARRAY_INSERT(Object, Member, Item, Index) | 在指定位置插入元素，并记录插入变更。 |
+| MARKUP_ARRAY_REMOVE_AT(Object, Member, Index) | 移除指定索引的元素，并记录删除变更。 |
+| MARKUP_ARRAY_REMOVE_ITEM(Object, Member, Item) | 移除匹配元素，并记录删除变更。 |
+| MARKUP_ARRAY_REPLACE(Object, Member, Index, Item) | 替换指定索引的元素，并记录替换变更。 |
+| MARKUP_ARRAY_RESIZE(Object, Member, Size) | 调整数组长度，并记录新增或删除变更。 |
 
 ### Map 宏
 
 | 宏 | 作用 |
 | --- | --- |
-| `MARKUP_MAP_ADD(Object, Member, Key, Value)` | 新增键值对，并记录新增变更。 |
-| `MARKUP_MAP_REPLACE(Object, Member, Key, Value)` | 替换已有键的值，并记录替换变更。 |
-| `MARKUP_MAP_REMOVE(Object, Member, Key)` | 移除指定键，并记录删除变更。 |
+| MARKUP_MAP_ADD(Object, Member, Key, Value) | 新增键值对，并记录新增变更。 |
+| MARKUP_MAP_REPLACE(Object, Member, Key, Value) | 替换已有键的值，并记录替换变更。 |
+| MARKUP_MAP_REMOVE(Object, Member, Key) | 移除指定键，并记录删除变更。 |
 
 例如：
 
@@ -1118,40 +1118,29 @@ void UpdateInventory(
 
 #### 普通属性函数
 
-```cpp
-namespace MarkupUI
-{
-    void NotifyPropertyChanged(UObject* Object, FName MemberName);
-}
-```
+| 函数 | 作用 |
+| --- | --- |
+| MarkupUI::NotifyPropertyChanged(UObject* Object, FName MemberName) | 通知普通属性变化；数组或字典进行清空、排序、交换、反转或打乱等整体变更后，也使用此函数。 |
 
 #### Array 函数
 
-```cpp
-namespace MarkupUI
-{
-    void NotifyArrayAdded(UObject* Object, FName MemberName, int32 Index);
-    void NotifyArrayAppended(UObject* Object, FName MemberName, int32 NewCount);
-    void NotifyArrayInserted(UObject* Object, FName MemberName, int32 Index, int32 Count);
-
-    void NotifyBeginArrayDelete(UObject* Object, FName MemberName, int32 Index);
-    void NotifyEndArrayDelete(UObject* Object, FName MemberName);
-
-    void NotifyBeginArrayReplace(UObject* Object, FName MemberName, int32 Index);
-    void NotifyEndArrayReplace(UObject* Object, FName MemberName);
-}
-```
+| 函数 | 作用 |
+| --- | --- |
+| MarkupUI::NotifyArrayAdded(UObject* Object, FName MemberName, int32 Index) | 通知在末尾添加了一个元素。 |
+| MarkupUI::NotifyArrayAppended(UObject* Object, FName MemberName, int32 NewCount) | 通知在末尾追加了多个元素。 |
+| MarkupUI::NotifyArrayInserted(UObject* Object, FName MemberName, int32 Index, int32 Count) | 通知从指定索引插入了一个或多个元素。 |
+| MarkupUI::NotifyBeginArrayDelete(UObject* Object, FName MemberName, int32 Index) | 在删除指定索引处元素前调用。 |
+| MarkupUI::NotifyEndArrayDelete(UObject* Object, FName MemberName) | 删除完成后调用。 |
+| MarkupUI::NotifyBeginArrayReplace(UObject* Object, FName MemberName, int32 Index) | 在替换指定索引处元素前调用。 |
+| MarkupUI::NotifyEndArrayReplace(UObject* Object, FName MemberName) | 替换完成后调用。 |
 
 #### Map 函数
 
-```cpp
-namespace MarkupUI
-{
-    void NotifyMapAdded(UObject* Object, FName MemberName, const FMarkupValue& Key);
-    void NotifyMapReplaced(UObject* Object, FName MemberName, const FMarkupValue& Key);
-    void NotifyMapRemoved(UObject* Object, FName MemberName, const FMarkupValue& Key);
-}
-```
+| 函数 | 作用 |
+| --- | --- |
+| MarkupUI::NotifyMapAdded(UObject* Object, FName MemberName, const FMarkupValue& Key) | 通知新增了指定键。 |
+| MarkupUI::NotifyMapReplaced(UObject* Object, FName MemberName, const FMarkupValue& Key) | 通知替换了指定键对应的值。 |
+| MarkupUI::NotifyMapRemoved(UObject* Object, FName MemberName, const FMarkupValue& Key) | 通知移除了指定键。 |
 
 例如，已有业务接口修改受保护属性后，可直接通知：
 
