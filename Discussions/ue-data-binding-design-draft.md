@@ -107,27 +107,33 @@ RML 不自动读取对象成员或执行任意函数。每一项可见属性和�
 
 `data-*` 和 `{{ ... }}` 是 RML 的保留语法，必须在文档加载前写好。运行中给现有元素动态添加这些属性，不应期待它们变成绑定。
 
-## C++ 原生方案
+## C++ 绑定方案
 
-### 统一的运行时绑定对象：`FMarkupObservableObject`
+### 可观察对象
 
-原生 C++ 数据模型优先继承 `FMarkupObservableObject`，并通过 `MARKUP_*` 宏声明属性、嵌套对象、数组、只读字段、业务 Setter 和命令。
+原生 C++ 数据模型推荐继承 `FMarkupObservableObject`，并通过 `MARKUP_*` 宏（也可手写）声明属性、嵌套对象、数组、只读字段、业务 Setter 和命令。
 
-`IMarkupObservableObject` 是可观察对象接口；`FMarkupObservableObject` 是唯一推荐的基础实现。它维护属性/命令字典和属性变化事件。对象通过具名 `SetDataContext` 登记到文档后，使用相同 `data-model` 名称的 RML 子树自动从该字典读取、写入并订阅变化。
+> 在某些特定情况下，你也可以自己实现 `IObservableObject` 以支持将自己的类嵌入到 `MarkupUI`， 一般情况下 `FMarkupObservableObject` 已经为你做好基础工作，通常应该选择继承它以减少代码工作量。
 
-UE 反射路径直接使用 `UObject`。`SetDataContext(Name, UObject*)` 创建实现 `IMarkupFrontendObject` 的反射 Adapter，以 UE 反射按需读取已公开的属性和函数。`UObject` 不实现、不持有也不会被转换为 `IMarkupObservableObject`，UE 反射路径同样不经过原生 C++ Property/Store 数据层；它不创建第二个数据上下文、不复制属性，也不维护镜像属性。蓝图的 Set、数组和 Map 通知节点只作用于这个 UObject 上真实存在的成员。
+`IObservableObject` 是可观察对象的抽象接口；`FMarkupObservableObject` 是唯一推荐的基础实现。它维护属性/命令字典和属性变化事件。对象通过具名 `SetDataContext` 登记到文档后，使用相同 `data-model` 名称的 RML 子树自动从该字典读取、写入并订阅变化。
 
-### 可绑定对象
+### 定义可观察对象
 
-为了让 C++ 数据模型能够用简洁、声明式的方式定义属性，同时保留 UE 所需的权限、具名文档数据上下文和命令能力，应提供一组只依赖 C++ 的模型宏。它们不要求 `UObject`，也不依赖 `UPROPERTY`；因此可用于 Slate、子系统、普通游戏状态和自动化测试。
+为了让 C++ 数据模型能够用简洁、声明式的方式定义属性，同时保留 UE 所需的权限、具名文档数据上下文和命令能力，应提供一组只依赖 C++ 的模型宏。
 
-属性声明和构造函数登记处于两个不同的 C++ 作用域：类定义宏生成受保护的可绑定属性字段，以及按权限裁剪的公开 Getter/Setter；构造函数调用 `RegisterProperty` 登记字段，并可选择登记该对象的 Getter、Setter 成员函数。没有隐藏登记成员、没有额外属性清单，也不需要 Begin/End 类宏。
+> 可观测对象的目的是不依赖 `UObject`，也不依赖 `UPROPERTY`；因此可用于 Slate、子系统、普通游戏状态和自动化测试。
+> UObject 属于 `MarkupUI` 原生支持，具体可看后面章节；
 
-属性名在类定义宏与 `RegisterProperty` 中各出现一次。这是刻意保留的、可审查的显式关联：开发者可以一眼看出哪个字段被公开给 UI，以及页面读写会经过哪些成员函数；构造函数也与完全手写代码一一对应。
+一个可观察属性声明和构造函数登记处于两个不同的 C++ 作用域：
+1. 类定义宏生成受保护的可绑定属性字段，以及按权限裁剪的公开 Getter/Setter；
+2. 构造函数调用 `RegisterProperty` 登记字段，并可选择登记该对象的 Getter、Setter 成员函数。
+
+
+Markup 属性 ( `IMarkupProperty` ) 定义宏与 `RegisterProperty` 通常成对出现。这是刻意保留的、可审查的显式关联：开发者可以一眼看出哪个字段被公开给 UI，以及页面读写会经过哪些成员函数；构造函数也与完全手写代码一一对应。
 
 `FMarkupObservableObject` 维护“名称 → 属性”字典。读写权限由属性字段本身决定：无后缀属性宏表示读写，`_READONLY` 表示只读，`_WRITEONLY` 表示只写；对象、数组和字典遵循同一规则。读写权限是可绑定属性的模型标识，与页面刷新方向无关。
 
-基类对模型和高级 C++ 使用者公开统一查询接口：
+基类对模型和高级 C++ 使用者公开统一查询接口，下面是为了支持可观测性类定义需要用到的基础数据类型：
 
 ```cpp
 class FMarkupCommand;
@@ -211,15 +217,28 @@ protected:
 };
 ```
 
-`IMarkupProperty` 是所有可绑定属性的共同登记接口；标量、对象、数组和字典分别由其专有字段类型保存。`FMarkupCommand` 保存参数契约和成员函数调用描述；`FMarkupPropertyChangedEvent` 发送属性变化路径，`FMarkupArrayChangedEvent` 和 `FMarkupMapChangedEvent` 分别发送数组与 Map 的结构变化。
-
 `TMarkupObservableArray`、`TMarkupObservableMap` 与 `FMarkupObservableObject` 同属可观察数据模型基础层。它们必须提供与 `TArray`、`TMap` 对应的操作函数。能明确表达为新增、追加、插入、删除、替换的操作记录细粒度集合变更；排序、交换、打乱、谓词批量删除，以及返回可写元素引用、可写迭代器、可写数据指针的操作，先记录一次整体集合变更再交出可写访问。
 
 `RegisterProperty` 可将页面读写接到已登记的 Getter、Setter 成员函数：未登记的一侧直接使用属性字段，登记的一侧必须经过该成员函数。Lambda、自由函数、静态成员函数及裸 `this` 回调都不是属性访问器的登记形式。原生 C++ 模型绑定通过这些接口工作，不需要了解派生类的成员布局；`UObject` 数据上下文则由独立的反射 Adapter 直接适配为 `IMarkupFrontendObject`，不经过这些 Property 接口。
 
-#### 可绑定属性
+`IMarkupProperty` 是所有可绑定属性的共同登记接口；标量、对象、数组和字典分别由其专有字段类型保存。`FMarkupCommand` 保存参数契约和成员函数调用描述；`FMarkupPropertyChangedEvent` 发送属性变化路径，`FMarkupArrayChangedEvent` 和 `FMarkupMapChangedEvent` 分别发送数组与 Map 的结构变化。
 
-标量属性使用非模板的 `FMarkupProperty`。对象、数组和字典分别使用 `FMarkupObjectProperty`、`FMarkupArrayProperty`、`FMarkupMapProperty`；它们都实现 `IMarkupProperty`，因此可以以同一种方式登记到对象。`EMarkupDataType` 只描述标量属性的值类型，不承担对象或容器的类型描述。所有属性都以 `Access` 固定可读写能力，而不是由页面或某个控件决定。
+
+#### 可观察属性
+
+`IMarkupProperty` 表示一个可以被观察的属性，目的是为了让 UI 能够捕获到可观察对象上的属性变化。
+
+**MarkupUI** 中定义了下面的观察属性方便开发者构造可观察对象：
+
+- `FMarkupProperty`: 标量属性
+- `FMarkupObjectProperty`: 对象属性
+- `FMarkupArrayProperty`: 集合（数组）属性
+- `FMarkupMapProperty`: 字典属性
+
+它们都实现 `IMarkupProperty`，因此可以以同一种方式登记到对象。
+
+> `EMarkupDataType` 只描述标量属性的值类型，不承担对象或容器的类型描述。
+> 所有属性都以 `Access` 固定可读写能力，和页面中绑定方向是两个层次的 ACL。
 
 以下是拟议的伪代码定义。它只描述公开形状，不代表最终头文件名、include、模块导出规则或 ABI。标量的类型化 Get/Set 必须与 `DataType` 匹配；对象、数组和字典的类型化接口必须与其工厂所指定的类型匹配。不匹配时在开发环境报告明确错误，写入返回失败，不进行隐式转换。
 
@@ -375,8 +394,6 @@ private:
     TSharedPtr<IMarkupMapPropertyStore> Store;
 };
 ```
-
-`FMarkupProperty` 只处理标量。对象、数组和字典的类型化访问分别由专有属性类型提供：`FMarkupObjectProperty` 提供 `GetObject<T>` / `SetObject<T>`，`FMarkupArrayProperty` 提供 `GetArray<T>` / `SetArray<T>`，`FMarkupMapProperty` 提供 `GetMap<TKey, TValue>` / `SetMap<TKey, TValue>`。数组、字典 Getter 返回可观察集合对象；集合对象以 `GetArray()`、`GetMap()` 暴露内部原生容器的 `const` 引用。Setter 接收原生集合的 `const` 引用并复制值到既有可观察集合，不替换集合包装对象。
 
 #### Property Store 的类型擦除边界
 
@@ -712,7 +729,7 @@ private:
 - Frontend Adapter 解析对应 Property，再通过非模板的 `IMarkupFrontendArray` 或 `IMarkupFrontendMap` 提供数量、元素和键值对。RML 不接触 `TArray`、`TMap`、`TSharedPtr` 或模板类型。
 - `TMarkupObservableArray` 和 `TMarkupObservableMap` 不能直接设置为数据上下文。`SetDataContext` 只接受可观察 Object，集合必须登记为该 Object 的 Array 或 Map Property。
 - Adapter 从对象属性访问原有可观察集合，不复制集合内容。
-- 首版集合元素和 Map 值支持标量或 `TSharedPtr<IMarkupObservableObject>`；Map 键只支持 `FString`、`FName` 和 `int32`。
+- 集合元素和 Map 值的支持范围见文末“集合元素支持范围”两张表；Map 键只支持 `FString`、`FName` 和 `int32`。
 - 首版不支持数组嵌套数组、数组嵌套 Map，或以集合为 Map 值。需要这些层级时，必须通过可观察对象属性包裹下一层集合。
 - 首版 Frontend 只读取集合，不提供整体写回数组或 Map 的入口。C++ 通过类型化 `SetArray`、`SetMap` 替换集合内容；页面通过可绑定命令表达新增、删除或替换意图。
 
@@ -1297,7 +1314,7 @@ items[0].count
 
 字段名、成员名、命令名只允许字母、数字和下划线，且以字母或下划线开头。不要把用户输入、资产路径或对象名直接拼进路径。
 
-不会直接暴露 `UObject*`、`UClass*`、组件、世界、Actor、委托、接口对象、软引用或硬引用。若 UI 需要显示物品图标或角色名，应公开稳定 ID、文本、图片 URI 等表现数据，而非对象本身。
+UObject 引用不会作为指针值暴露给 RML。原生 C++ 可观察对象可以通过 `TWeakObjectPtr<T>` 或 `TStrongObjectPtr<T>` 属性将 UObject、Actor 或组件作为下级对象节点公开，页面只能继续读取该对象允许绑定的反射属性。`UClass*`、委托、接口对象和软引用不作为首版绑定值；若 UI 只需要物品图标或角色名，仍应优先公开稳定 ID、文本和图片 URI，而不是扩大整个业务对象的页面可见范围。
 
 ### 更新和脏标记
 
@@ -1598,14 +1615,12 @@ Ui->GetDocument()->SetDataContext(TEXT("inventory"), InventoryData);
 | Set Data Context | 输入 `Model Name` 和 `Object`，按 `data-model` 名称将该对象设置为 RML 文档的具名数据上下文。 |
 | `Set <属性名> (Markup UI)` | 写入该对象的普通 `UPROPERTY`，再通知 RML 刷新依赖此属性的绑定。 |
 | Notify Markup Property Changed | 原生 Set 或 C++ 已经改值后，显式通知指定属性。 |
-| `BeginDataUpdate` | `URmlUiWidget` 开始合并其当前 Document 中的属性刷新。 |
-| `EndDataUpdate` | `URmlUiWidget` 提交当前 Document 合并后的属性刷新。 |
 
 `Set <属性名> (Markup UI)` 在写入成功后通知 MarkupUI 刷新该属性的绑定；普通原生 Set 不自动触发此通知。C++ 直接通过 `SRmlUiWidget->GetDocument()->BeginDataUpdate()` 创建更新作用域；蓝图无法直接持有该 C++ Document 对象，因此 `BeginDataUpdate` 和 `EndDataUpdate` 作为 `URmlUiWidget` 的蓝图函数转发到其当前 Document。
 
 ### `TArray` 属性的更新
 
-会修改数组的蓝图节点如下：
+通过以下蓝图节点来代替原生的数组编辑蓝图节点，可以实现数组变化后自动更新界面。
 
 | 节点 | 作用 |
 | --- | --- |
@@ -1622,13 +1637,14 @@ Ui->GetDocument()->SetDataContext(TEXT("inventory"), InventoryData);
 | Swap Array Elements (Markup UI) | 交换两个元素，并通知数组属性。 |
 | Shuffle (Markup UI) | 打乱数组，并通知数组属性。 |
 
-数组变更节点必须能够追溯到具体 `UObject` 上的数组属性，以确定变更后应通知的对象与属性名。临时数组、函数返回数组或来源不明的数组不属于可通知的数据上下文属性，不应被当作 MarkupUI 绑定集合处理。
+数组变更节点必须能够追溯到具体 `UObject` 上的数组属性，以确定变更后应通知的对象与属性名。
+> 如果数组不是 `UObject` 上的成员变量（例如本地临时变量、函数返回新创建的 Array），无法使用以上节点。
 
-操作完成后，节点通知整个数组属性；随后 `data-for` 按 RmlUi 的原生规则更新子树。只读查询节点不产生通知。
+操作完成后，节点通知整个数组属性；随后 `data-for` 等页面绑定将按 RmlUi 的原生规则更新子树。只读查询节点不产生通知。
 
 ### `TMap` 属性的更新
 
-首版提供以下会改变 Map 的节点：
+通过以下蓝图节点来代替原生的 **Map** 编辑蓝图节点，可以实现数组变化后自动更新界面。
 
 | 节点 | 作用 |
 | --- | --- |
@@ -1636,7 +1652,11 @@ Ui->GetDocument()->SetDataContext(TEXT("inventory"), InventoryData);
 | Remove (Markup UI) | 按键移除一个键值对，并通知 Map 属性。 |
 | Clear (Markup UI) | 清空 Map，并通知 Map 属性。 |
 
-Map 变更节点同样必须能够追溯到具体 `UObject` 上的 Map 属性；执行完成后通知整个 Map 属性。Add 保持 UE 原生节点行为，但内部会区分新增与替换，以保留与 C++ 原生集合一致的细节记录；Remove 未找到键时仍可发出一次无害通知。Find、Contains、Length、Keys、Values 等只读操作不通知。
+Map 变更节点同样必须能够追溯到具体 `UObject` 上的 Map 属性；执行完成后通知整个 Map 属性。
+> Add 保持 UE 原生节点行为，但内部会区分新增与替换，以保留与 C++ 原生集合一致的细节记录；
+> Remove 未找到键时仍可发出一次无害通知。
+> Find、Contains、Length、Keys、Values 等只读操作不通知。
+> 如果一个 Map 不是 `UOjbect` 上的成员变量（例如本地临时变量、函数返回新创建的 Map），无法使用以上节点。
 
 ### 命令
 
@@ -1651,97 +1671,59 @@ Map 变更节点同样必须能够追溯到具体 `UObject` 上的 Map 属性；
 
 ## 在 C++ 中进行 `UObject` 变化通知
 
-`UObject` 实例（指针）可以通过宏修改 `UPROPERTY` 属性，宏修改会自动发送属性变化通知来更新已绑定到当前对象的页面内容。
+`UObject` 实例（指针）可以通过 `MarkupUI` 提供的 C++ 通知函数通知属性变化来更新界面。
 
-所有宏都以 `Object` 和 `Member` 为前两个参数；例如 `InventoryData` 与 `&UMarkupInventoryData::InventoryItems`。`Member` 传入成员指针，而不是属性名字符串。
-
-### 普通属性宏
-
-| 宏 | 作用 |
-| --- | --- |
-| MARKUP_PROPERTY_SET(Object, Member, Value) | 写入普通属性；值实际变化后通知该属性。 |
-| MARKUP_NOTIFY_PROPERTY_CHANGED(Object, Member) | 属性已经由业务代码写入后，通知该属性。 |
-
-### 数组宏
-
-| 宏 | 作用 |
-| --- | --- |
-| MARKUP_ARRAY_ADD(Object, Member, Item) | 在末尾添加元素，并记录新增变更。 |
-| MARKUP_ARRAY_ADD_UNIQUE(Object, Member, Item) | 不存在相同元素时添加，并记录新增变更。 |
-| MARKUP_ARRAY_APPEND(Object, Member, AppendedItems) | 追加传入集合中的元素，并记录新增变更。 |
-| MARKUP_ARRAY_INSERT(Object, Member, Item, Index) | 在指定位置插入元素，并记录插入变更。 |
-| MARKUP_ARRAY_REMOVE_AT(Object, Member, Index) | 移除指定索引的元素，并记录删除变更。 |
-| MARKUP_ARRAY_REMOVE_ITEM(Object, Member, Item) | 移除匹配元素，并记录删除变更。 |
-| MARKUP_ARRAY_REPLACE(Object, Member, Index, Item) | 替换指定索引的元素，并记录替换变更。 |
-| MARKUP_ARRAY_RESIZE(Object, Member, Size) | 调整数组长度，并记录新增或删除变更。 |
-
-### Map 宏
-
-| 宏 | 作用 |
-| --- | --- |
-| MARKUP_MAP_ADD(Object, Member, Key, Value) | 新增键值对，并记录新增变更。 |
-| MARKUP_MAP_REPLACE(Object, Member, Key, Value) | 替换已有键的值，并记录替换变更。 |
-| MARKUP_MAP_REMOVE(Object, Member, Key) | 移除指定键，并记录删除变更。 |
-
-例如：
-
-```cpp
-void UpdateInventory(
-    UMarkupInventoryData* InventoryData,
-    int32 NewGold,
-    const FName& NewItem,
-    const TArray<FName>& NewItems,
-    int32 Index,
-    FName Key,
-    int32 Count)
-{
-    MARKUP_PROPERTY_SET(InventoryData, &UMarkupInventoryData::Gold, NewGold);
-
-    MARKUP_ARRAY_ADD(InventoryData, &UMarkupInventoryData::InventoryItems, NewItem);
-    MARKUP_ARRAY_APPEND(InventoryData, &UMarkupInventoryData::InventoryItems, NewItems);
-    MARKUP_ARRAY_REPLACE(InventoryData, &UMarkupInventoryData::InventoryItems, Index, NewItem);
-
-    MARKUP_MAP_ADD(InventoryData, &UMarkupInventoryData::ItemCounts, Key, Count);
-    MARKUP_MAP_REPLACE(InventoryData, &UMarkupInventoryData::ItemCounts, Key, Count);
-}
-```
 
 ### 原生 C++ 通知函数
 
-当无法通过 `UPROPERTY` 触发通知时（例如 `UPROPERTY` 字段**不是** public），还可以使用 `MarkupUI` 命名空间中的通知函数。函数通过成员名称（优先使用 UE 的 `GET_MEMBER_NAME_CHECKED` 获取）通知成员变化。
+`MarkupUI` 命名空间中的原生通知函数用于报告业务代码已经完成的数据修改。通知函数只负责发送变化信息，不会把任意 C++ 字段注册成可绑定属性，也不会代替实际的数据修改。
 
-> `UPROPERTY` 字段**不是** public 时，你无法使用 `GET_MEMBER_NAME_CHECKED` 获取名称, 也可以传递字符串名称，字符串不是类型安全的，当字段名修改后不要忘记更新你的通知代码。
+使用这些函数时必须满足以下前提：
+
+- 普通属性、Array 和 Map 都必须是可绑定 UObject 对象图中可由反射访问的 `UPROPERTY`，并满足 MarkupUI 的属性可见性规则。
+- Array 或 Map 可以位于数据上下文 UObject 上，也可以位于页面已经读取到的下级 UObject 或 `USTRUCT` 路径中，但最终集合本身必须对应一个 `UPROPERTY`。
+- 临时变量、局部容器、普通非反射 C++ 成员，以及尚未被页面读取的集合，不会仅因为调用通知函数而成为可绑定数据。
+- 普通属性通过所属 UObject 和相对于该对象的成员名称或属性路径通知。
+- Array 和 Map 通过实际集合实例通知；调用方不需要再次提供所属 UObject、成员名称或完整绑定路径。集合与属性路径之间的关系在页面读取该集合时建立。
 
 #### 普通属性函数
 
 | 函数 | 作用 |
 | --- | --- |
-| MarkupUI::NotifyPropertyChanged(Object, MemberName) | 通知普通属性变化；数组或字典进行清空、排序、交换、反转或打乱等整体变更后，也使用此函数。 |
+| MarkupUI::NotifyPropertyChanged(Object, MemberName) | 通知普通属性或属性路径变化。 |
 
 #### Array 函数
 
 | 函数 | 作用 |
 | --- | --- |
-| MarkupUI::NotifyArrayAdded(Object, MemberName, Index) | 通知在末尾添加了一个元素。 |
-| MarkupUI::NotifyArrayAppended(Object, MemberName, NewCount) | 通知在末尾追加了多个元素。 |
-| MarkupUI::NotifyArrayInserted(Object, MemberName, Index, Count) | 通知从指定索引插入了一个或多个元素。 |
-| MarkupUI::NotifyBeginArrayDelete(Object, MemberName, Index) | 在删除指定索引处元素前调用。 |
-| MarkupUI::NotifyEndArrayDelete(Object, MemberName) | 删除完成后调用。 |
-| MarkupUI::NotifyBeginArrayReplace(Object, MemberName, Index) | 在替换指定索引处元素前调用。 |
-| MarkupUI::NotifyEndArrayReplace(Object, MemberName) | 替换完成后调用。 |
+| MarkupUI::NotifyArrayAdded(Array) | 在末尾添加一个元素后调用；末尾索引由通知函数取得。 |
+| MarkupUI::NotifyArrayAppended(Array, AppendCount) | 在末尾追加多个元素后调用；`AppendCount` 是本次新增的元素数量。 |
+| MarkupUI::NotifyArrayInserted(Array, Index, Count) | 在指定索引插入一个或多个元素后调用。 |
+| MarkupUI::NotifyBeginArrayDelete(Array, Index, Count) | 删除指定范围前调用。 |
+| MarkupUI::NotifyEndArrayDelete(Array) | 删除完成后调用。 |
+| MarkupUI::NotifyBeginArrayReplace(Array, Index, Count) | 替换指定范围前调用。 |
+| MarkupUI::NotifyEndArrayReplace(Array) | 替换完成后调用。 |
+| MarkupUI::NotifyArrayChanged(Array) | 清空、排序、交换、反转、打乱或无法准确描述的整体变化完成后调用。 |
 
 #### Map 函数
 
 | 函数 | 作用 |
 | --- | --- |
-| MarkupUI::NotifyMapAdded(Object, MemberName, Key) | 通知新增了指定键。 |
-| MarkupUI::NotifyMapReplaced(Object, MemberName, Key) | 通知替换了指定键对应的值。 |
-| MarkupUI::NotifyMapRemoved(Object, MemberName, Key) | 通知移除了指定键。 |
+| MarkupUI::NotifyMapAdded(Map, Key) | 新增指定键后调用。 |
+| MarkupUI::NotifyMapReplaced(Map, Key) | 替换指定键对应的值后调用。 |
+| MarkupUI::NotifyMapRemoved(Map, Key) | 移除指定键后调用。 |
+| MarkupUI::NotifyMapChanged(Map) | 清空或无法准确描述的整体变化完成后调用。 |
 
 **注意**
 
- - 单步通知函数：（没有 `Begin` / `End`）更新结束后调用。
- - 两步通知函数： (`Begin` / `End` 成对出现) 应该在更新数据前调用 `Begin`, 更新完成后调用 `End`， 
+- 单步通知函数（没有 `Begin` / `End`）在集合更新完成后调用。
+- 两步通知函数（`Begin` / `End`）必须成对出现：修改集合前调用 `Begin`，修改完成后调用 `End`。
+- 集合实例只有在被页面成功读取后才会建立观察关系。未被任何活动数据上下文读取的集合不会产生页面刷新，也不需要从集合反向搜索所属 Object。
+- 同一个集合可能被多个模型或多个文档观察；一次集合通知会送达所有仍然有效的观察关系。
+- 语言无关的数据绑定层必须保留集合通知中的操作种类、索引、数量和 Map Key，不得因为某个前端当前只支持整体验证就提前丢失这些信息。
+- 具体前端的 Bridge 在提交刷新时，才根据目标语言真实具备的刷新粒度决定是否将细粒度集合变化收拢为整个集合或顶层变量变化。该限制不得反向污染公共通知 API 和语言无关层。
+- 集合地址仅用于定位候选观察关系，不代表集合的所有权，也不会被保存后直接解引用。通知派发前必须依据弱宿主对象、已读取属性路径和当前集合地址重新验证身份，防止容器移动或内存地址复用造成误通知。
+- 通知函数可以从任意线程调用，但这不表示容器修改本身自动具备线程安全性；调用方仍须保证集合写入符合其业务线程模型。
 
 例如，已有业务接口修改受保护属性后，可直接通知：
 
@@ -1764,20 +1746,80 @@ void RemoveInventoryItemThroughBusinessApi(
     UMarkupInventoryData* InventoryData,
     int32 Index)
 {
-    MarkupUI::NotifyBeginArrayDelete(
-        InventoryData,
-        GET_MEMBER_NAME_CHECKED(UMarkupInventoryData, InventoryItems),
-        Index);
+    const TArray<FName>& InventoryItems = InventoryData->GetInventoryItems();
+    MarkupUI::NotifyBeginArrayDelete(InventoryItems, Index);
 
     InventoryData->RemoveInventoryItemAt(Index);
 
-    MarkupUI::NotifyEndArrayDelete(
-        InventoryData,
-        GET_MEMBER_NAME_CHECKED(UMarkupInventoryData, InventoryItems));
+    MarkupUI::NotifyEndArrayDelete(InventoryItems);
 }
 ```
 
-所有集合宏均在一次调用中完成容器操作和变更记录。数组和 Map 宏保留新增、插入、删除、替换等集合变更明细。当前 RML 绑定层可以将其作为整个属性变化处理；将来 UI 层支持局部集合更新时，仍可直接使用同一份变更记录，不要求游戏代码改写。
+集合通知函数与容器操作相互独立：业务代码先执行修改，再按前述调用时机报告变化。通知会保留新增、追加、插入、删除、替换等集合变更明细。当前 RML Bridge 可以根据 RmlUi 的实际刷新能力收拢这些变化；将来其他前端支持更细粒度的集合更新时，仍可使用同一份变更记录，不要求游戏代码改写。
+
+受保护的 Array 和 Map 属性仍然可以使用集合实例通知。属性本身必须是满足绑定可见性要求的 `UPROPERTY`；C++ Getter 可以向业务代码返回集合引用，调用方修改该引用后，直接将同一个集合实例传给通知函数：
+
+```cpp
+UCLASS()
+class UInventoryData final : public UObject
+{
+    GENERATED_BODY()
+
+public:
+    TArray<FName>& GetItems() { return Items; }
+    TMap<FName, int32>& GetItemCounts() { return ItemCounts; }
+
+protected:
+    UPROPERTY(BlueprintReadOnly, Category = "MarkupUI|DataBinding")
+    TArray<FName> Items;
+
+    UPROPERTY(BlueprintReadOnly, Category = "MarkupUI|DataBinding")
+    TMap<FName, int32> ItemCounts;
+};
+```
+
+此时虽然我们无法访问受保护属性 `Items` 和 `ItemCounts`， 仍然可以用值引用来通知属性变化。
+
+```cpp
+void AddInventoryItem(UInventoryData& InventoryData, const FName& ItemName)
+{
+    TArray<FName>& Items = InventoryData.GetItems();
+    Items.Add(ItemName);
+    MarkupUI::NotifyArrayAdded(Items);
+}
+
+void RemoveInventoryItem(UInventoryData& InventoryData, int32 Index)
+{
+    TArray<FName>& Items = InventoryData.GetItems();
+    if (!Items.IsValidIndex(Index))
+    {
+        return;
+    }
+
+    MarkupUI::NotifyBeginArrayDelete(Items, Index);
+    Items.RemoveAt(Index);
+    MarkupUI::NotifyEndArrayDelete(Items);
+}
+
+
+void SetInventoryItemCount(UInventoryData& InventoryData, const FName& ItemName, int32 Count)
+{
+    TMap<FName, int32>& ItemsCountFromGet = InventoryData.GetItemCounts();
+    const bool bAlreadyExists = ItemsCountFromGet.Contains(ItemName);
+    ItemsCountFromGet.Add(ItemName, Count);
+
+    if (bAlreadyExists)
+    {
+        MarkupUI::NotifyMapReplaced(ItemsCountFromGet, ItemName);
+    }
+    else
+    {
+        MarkupUI::NotifyMapAdded(ItemsCountFromGet, ItemName);
+    }
+}
+```
+
+Getter 的可见性只影响 C++ 调用方式，不改变绑定前提：`Items` 和 `ItemCounts` 仍是反射属性。局部变量或普通非 `UPROPERTY` 容器即使也能传入同名通知函数，也没有可供页面匹配的观察关系，因此不会触发数据绑定刷新。
 
 ## Slate（C++）使用草案
 
@@ -1952,7 +1994,53 @@ Frontend 不设置统一的读取生命周期管理器。每个 Adapter 都独�
 
 原生 C++ 可观察对象一旦作为数据上下文或已登记属性参与绑定，其自身的属性变化通知即可继续驱动页面更新，不需要通过 UE 反射观察这套通知。
 
+原生 C++ 可观察对象通过 `TWeakObjectPtr<T>` 或 `TStrongObjectPtr<T>` 登记 UObject 子属性。两种引用都在每次读取时重新检查：弱引用不会保活 UObject，强引用明确表示业务模型需要保持该对象存活。普通 `UObject*` 和 `TObjectPtr<T>` 不属于这条原生属性契约，避免在非 UObject、非 GC 扫描的数据模型中形成含义不明确的对象所有权。
+
+同样的规则适用于原生可观察对象的直接属性、Array 元素和 Map Value。路径进入 UObject 后由反射属性规则继续解析，并订阅该 UObject 的属性变化通知；路径不会把 UObject 转换成原生可观察对象，也不会把对象指针值传递给 RML。
+
 首版不尝试从任意 `UObject` 中发现由普通 C++ 字段、`TSharedPtr` 或其他非反射成员持有的原生 C++ 可观察对象。需要这种方向的混合关系时，应先调整公开的数据上下文结构；后续可再评估通过显式属性访问入口开放，而不要求 `UObject` 实现 MarkupUI 协议。
+
+### 集合元素支持范围
+
+以下表格**仅针对 TArray 元素和 TMap 的 Value**。UObject 侧集合须为可见的 `UPROPERTY`；ObservableObject 侧集合须登记为 Property。ObservableObject 侧同样适用于 `TMarkupObservableArray` 和 `TMarkupObservableMap`。Map 键限定为 `FString`、`FName`、`int32`，页面表达式仍受当前 RML Map 能力限制。
+
+#### 元素类型支持对比
+
+| 元素 / Value 类型 | UObject | ObservableObject |
+| --- | --- | --- |
+| `bool`、`int32`、`int64`、`float`、`double` | ✅ | ✅ |
+| `FString`、`FText`、`FName` | ✅ | ✅ |
+| UE 反射枚举 | ✅ | ✅ |
+| 普通 C++ 枚举 | ❌ | ✅ |
+| `FLinearColor`、`FVector2D` | ✅ | ✅ |
+| `UObject*` | ✅ | ❌ |
+| `TObjectPtr<UObject>` | ✅ | ❌ |
+| `TWeakObjectPtr<UObject>` | ✅ | ✅ |
+| `TStrongObjectPtr<UObject>` | ❌ | ✅ |
+| `TSharedPtr<IObservableObject>` | ❌ | ✅ |
+| USTRUCT | ✅ | ✅ |
+| `TSharedPtr<USTRUCT>` | ❌ | ✅ |
+| `TWeakPtr<USTRUCT>` | ❌ | ✅ |
+
+#### 集合操作支持对比
+
+| 集合操作 | UObject | ObservableObject |
+| --- | --- | --- |
+| 读取数量与元素 | ✅ | ✅ |
+| 读取对象元素的属性 | ✅ | ✅ |
+| 读取 USTRUCT 元素的成员 | ✅ | ✅ |
+| 访问 USTRUCT 内的 Array / Map | ✅ | ✅ |
+| 前端直接写回标量元素 | ✅ | ✅ |
+| 前端写回对象元素的标量属性 | ✅ | ✅ |
+| 前端写回 USTRUCT 元素的标量成员 | ✅ | ✅ |
+| 普通集合显式变化通知 | ✅ | ✅ |
+
+USTRUCT 值及上述两种 USTRUCT 智能指针也可作为原生可观察对象的直接登记属性。结构体成员遵循相同的反射可见性要求，使用 `UPROPERTY(BlueprintReadOnly)` 或 `UPROPERTY(BlueprintReadWrite)` 暴露需要绑定的成员；结构体内可以继续包含受支持的 UObject、USTRUCT、Array 和 Map 成员。
+
+- `TSharedPtr<FMyStruct>` 由业务属性或集合保持结构体存活；`TWeakPtr<FMyStruct>` 不保活结构体，失效后读取返回无值。
+- 结构体没有独立的属性通知身份。修改结构体成员后，通过所属可观察对象发送属性路径通知，或通过所在集合发送对应变更通知。
+- 弱引用失效本身不会自动发送通知。业务若要求页面及时显示失效结果，仍需发出所属属性或集合的通知。
+- 原生结构体及其 `TSharedPtr` 不会自动让结构体中的 UObject 强引用参与 GC；需要由业务另外保证 UObject 生命周期，或使用可检测失效的 UObject 弱引用。
 
 ## 参考资料
 
