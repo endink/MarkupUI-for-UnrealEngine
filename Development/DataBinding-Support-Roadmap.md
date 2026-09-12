@@ -74,7 +74,9 @@ UObject 已经具备双向数据绑定的底层读写通路，但属性访问权
 
 ### 阶段 4：类型与错误处理
 
-- [ ] 核对 Bool、Int32、Int64、Float、Double、String、Text、Name、Enum、Color 和 Vector2D 的读写行为。
+- [ ] 核对 Bool、Int32、Int64、Float、Double、String、Text、Name、Enum、Color、Vector2D 和 Vector3 的读写行为。
+
+三维向量支持 `FVector3f` 和 `FVector`，包括普通属性、数组元素、Map 值的整体读写，以及命令参数传递。不新增分量访问或向量构造表达式。经过 RML 时采用 float 精度；不从字符串或普通数字隐式构造向量。
 - [ ] 明确数字转换、枚举合法性和字符串转换规则。
 - [ ] 类型不匹配、属性失效、对象失效和 Setter 拒绝均返回失败。
 - [ ] 错误日志包含模型名、属性路径、请求类型和目标类型，并对相同错误抑制刷屏。

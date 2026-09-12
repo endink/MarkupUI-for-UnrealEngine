@@ -1,8 +1,8 @@
 # UE 数据绑定设计草案
 
-> 状态：讨论草案。本文描述计划提供的公开能力、用法与验收标准；名称均为拟议名称，可在实现前调整。本文不假定读者了解 RML 或 RmlUi 的源码。
+> 设计目标与当前可调用能力分开说明；示例不是完整功能已验收的证明。本文不假定读者了解 RML 或 RmlUi 的源码。
 
-> **AI 阅读与实施约束：** 本文主要表达设计理念、职责边界、层次结构、数据流和必须保持的语义，不是要求逐字落实的 API 规格。文中的类名、函数名、接口签名、枚举和示例代码均为概念性表达；最终实现不要求与草案一一对应。实施前必须结合 MarkupUI 现有代码、已经封装的前端能力和当前明确决策重新核准设计，优先复用已有类型与抽象，不得为了匹配示例而重复定义类型或机械增加中间层。只要保持本文规定的职责边界和行为契约，实现可以调整命名、拆分方式、所有权表达和调用形式；若实现条件与草案假设冲突，应先指出差异并讨论，而不是擅自把草案示例当成既定代码结构。
+> **AI 阅读与实施约束：** 本文主要表达设计理念、职责边界、层次结构、数据流和必须保持的语义，不是要求逐字落实的 API 规格。架构讨论不要求最终类名、拆分方式与草案一一对应，但标为当前用法的示例必须与现有公开 API 一致。已废弃的宏、Getter／Setter 注册重载和更新作用域不能再被当作待实现要求。实施前必须结合 MarkupUI 现有代码、已经封装的前端能力和当前明确决策重新核准设计，优先复用已有类型与抽象，不得为了匹配示例而重复定义类型或机械增加中间层。只要保持本文规定的职责边界和行为契约，实现可以调整命名、拆分方式、所有权表达和调用形式；若实现条件与草案假设冲突，应先指出差异并讨论，而不是擅自把草案示例当成既定代码结构。
 
 ## 一句话目标
 
@@ -14,7 +14,7 @@
 
 数据绑定的第一步必须是可独立使用的 C++ 原生契约：它不要求 `UObject`、反射、UMG 或蓝图。Slate、游戏模块和任何普通 C++ 数据结构都能通过它创建模型、提供值、接受写入并注册命令。
 
-第二步是 UE 反射数据上下文：文档通过 `SetDataContext(Name, UObject*)` 把业务对象注册到指定的 RML `data-model` 名称。第三步才是 UMG 控件：它调用相同的数据上下文、字段通知和集合操作节点，不拥有另一套 RML 语法、刷新时序或验证规则。
+第二步是 UE 反射数据上下文：文档通过 `SetDataContext(Name, UObject&)` 把业务对象注册到指定的 RML `data-model` 名称。第三步才是 UMG 控件：它调用相同的数据上下文、字段通知和集合操作节点，不拥有另一套 RML 语法、刷新时序或验证规则。
 
 ```text
 C++ 原生模型、值、字段、写入、命令契约
@@ -38,13 +38,13 @@ MarkupUI 应采用 **C++ 数据对象 + 精确变化通知** 的思想，但不�
 
 | WPF 的通用思路 | MarkupUI 的对应设计 |
 | --- | --- |
-| 属性 Getter/Setter + 属性变化通知 | `FMarkupObservableObject` 与 `MARKUP_*` 属性宏。 |
+| 属性 Getter/Setter + 属性变化通知 | `FMarkupObservableObject`、`TMarkupProperty<T>` 与显式注册／通知。 |
 | 可观察集合 | `TMarkupObservableArray` 与 `TMarkupObservableMap`；它们只能作为可观察对象的属性，由集合变化事件通知对应字段。 |
 | 数据上下文 | 文档按 RML `data-model` 名称登记的可观察对象。只有文档支持设置数据上下文；元素、数组和 Map 均不能直接成为设置目标。 |
 | 单向、双向等绑定模式 | 由元素上的绑定属性选择 FromSource、FromUI 或双向；字段权限只决定对应读取或写入请求是否被接受，不引入与 RML 原生语法冲突的另一套标记。 |
 | 每次变化、失焦、显式提交 | 保持 RmlUi 控件原有 `change` 语义为默认；高频或延迟提交用明确命令实现，不隐式改变控件行为。 |
 
-最重要的差异是刷新粒度。RmlUi 原生数据模型只接受顶层变量的脏标记；因此 `Player.Name.First` 变化必须通知所属 `data-model` 的最外层字段 `player`。MarkupUI 文档按名称登记多个可绑定对象，RML 使用预先写好的 `data-model="..."` 为不同 DOM 子树选择模型；数组和 Map 只能作为对象属性参与绑定，不需要字段到文本、属性或样式的 Lambda 绑定 API。
+最重要的差异是刷新粒度。RmlUi 原生数据模型只接受顶层变量的脏标记；因此路径 `Player.Name.First` 最终标脏所属 `data-model` 的顶层字段 `Player`；业务侧仍可通知完整路径或子对象的本地属性。MarkupUI 文档按名称登记多个可绑定对象，RML 使用预先写好的 `data-model="..."` 为不同 DOM 子树选择模型；数组和 Map 只能作为对象属性参与绑定，不需要字段到文本、属性或样式的 Lambda 绑定 API。
 
 ## 三层分工
 
@@ -60,7 +60,7 @@ RML 文档
 - **UE 绑定模型**是每个界面实例的受控入口。它把 UE 的值变为 RML 能显示的值，追踪需要刷新的字段，并处理来自控件的写入和事件。
 - **RML 文档**只描述显示和交互意图。例如“显示金币”“当音量改变时写入 `music_volume`”“点击时执行 `select_item`”。它不持有游戏对象，也不拥有存档、网络或权限逻辑。
 
-RML 不自动读取对象成员或执行任意函数。每一项可见属性和命令都必须显式登记。
+原生可观察对象只公开已登记属性和命令；UObject 走反射可见性筛选，不要求业务对象逐个调用原生 RegisterProperty。两条路径不能混为一谈。
 
 ## 术语
 
@@ -76,7 +76,7 @@ RML 不自动读取对象成员或执行任意函数。每一项可见属性和�
 
 ## 支持范围
 
-第一阶段应支持以下 RML 标准写法：
+以下演示 RML 语法与目标数据结构，不与后文各个独立 C++ 示例共用一份模型。字段大小写必须与实际登记名称一致：
 
 ```html
 <div data-model="inventory">
@@ -91,7 +91,7 @@ RML 不自动读取对象成员或执行任意函数。每一项可见属性和�
 
   <input type="range" min="0" max="1" step="0.05"
          data-value="settings.music_volume"/>
-  <input type="checkbox" data-checked="settings.show_minimap"/>
+  <input type="checkbox" data-checked="show_minimap"/>
 </div>
 ```
 
@@ -109,995 +109,137 @@ RML 不自动读取对象成员或执行任意函数。每一项可见属性和�
 
 ## C++ 绑定方案
 
-### 可观察对象
+本节示例按当前公开 API 编写。省略的业务处理用注释标明，不再使用拟议的属性宏、Getter／Setter 注册重载或不存在的更新作用域。
 
-原生 C++ 数据模型推荐继承 `FMarkupObservableObject`，并通过 `MARKUP_*` 宏（也可手写）声明属性、嵌套对象、数组、只读字段、业务 Setter 和命令。
+### 可观察对象与 Property
 
-> 在某些特定情况下，你也可以自己实现 `IObservableObject` 以支持将自己的类嵌入到 `MarkupUI`， 一般情况下 `FMarkupObservableObject` 已经为你做好基础工作，通常应该选择继承它以减少代码工作量。
+- 原生模型契约是 `MarkupUI::DataBinding::IObservableObject`。开发者可以自行实现，不强制继承 `FMarkupObservableObject`。
+- `FMarkupObservableObject` 提供属性登记、命令登记与变化通知的常用实现。
+- 每个实例使用 `TMarkupProperty<T>` 字段保存自己的值；非模板基类 `FMarkupProperty` 用于统一登记和按名称查询。
+- Property 构造时只传初始值；名称在 `RegisterProperty(Name, Property)` 时传入，使用区分大小写的 `FString`。
+- 属性名、命令名分别不能重复；重复注册输出错误并保留原登记项，不以崩溃处理。
+- `RegisterProperty` 不接收 Getter／Setter。下面的业务 Get/Set 是普通 C++ 包装，前端不会根据函数名自动调用它们。
+- 业务代码通过对象的 `SetValue(Property, Value)` 修改值并发送通知。直接调用 Property 的 `SetValue` 不会自动发布所属对象的属性通知。
+- 当前不提供属性访问权限枚举、属性声明宏、静态 `Make`、清除局部值或默认值回退机制。
 
-`IObservableObject` 是可观察对象的抽象接口；`FMarkupObservableObject` 是唯一推荐的基础实现。它维护属性/命令字典和属性变化事件。对象通过具名 `SetDataContext` 登记到文档后，使用相同 `data-model` 名称的 RML 子树自动从该字典读取、写入并订阅变化。
-
-### 定义可观察对象
-
-为了让 C++ 数据模型能够用简洁、声明式的方式定义属性，同时保留 UE 所需的权限、具名文档数据上下文和命令能力，应提供一组只依赖 C++ 的模型宏。
-
-> 可观测对象的目的是不依赖 `UObject`，也不依赖 `UPROPERTY`；因此可用于 Slate、子系统、普通游戏状态和自动化测试。
-> UObject 属于 `MarkupUI` 原生支持，具体可看后面章节；
-
-一个可观察属性声明和构造函数登记处于两个不同的 C++ 作用域：
-1. 类定义宏生成受保护的可绑定属性字段，以及按权限裁剪的公开 Getter/Setter；
-2. 构造函数调用 `RegisterProperty` 登记字段，并可选择登记该对象的 Getter、Setter 成员函数。
-
-
-Markup 属性 ( `IMarkupProperty` ) 定义宏与 `RegisterProperty` 通常成对出现。这是刻意保留的、可审查的显式关联：开发者可以一眼看出哪个字段被公开给 UI，以及页面读写会经过哪些成员函数；构造函数也与完全手写代码一一对应。
-
-`FMarkupObservableObject` 维护“名称 → 属性”字典。读写权限由属性字段本身决定：无后缀属性宏表示读写，`_READONLY` 表示只读，`_WRITEONLY` 表示只写；对象、数组和字典遵循同一规则。读写权限是可绑定属性的模型标识，与页面刷新方向无关。
-
-基类对模型和高级 C++ 使用者公开统一查询接口，下面是为了支持可观测性类定义需要用到的基础数据类型：
+### 标量与嵌套对象
 
 ```cpp
-class FMarkupCommand;
-class IMarkupProperty;
-
-enum class EMarkupArrayChangeKind : uint8
-{
-    Added,
-    Appended,
-    Inserted,
-    Deleted,
-    Replaced,
-    Reset,
-};
-
-struct FMarkupArrayChange
-{
-    EMarkupArrayChangeKind Kind;
-    int32 Index = INDEX_NONE;
-    int32 Count = 0;
-};
-
-using FMarkupArrayChangedEvent =
-    TMulticastDelegate<void(const FMarkupArrayChange&)>;
-
-enum class EMarkupMapChangeKind : uint8
-{
-    Added,
-    Replaced,
-    Removed,
-    Reset,
-};
-
-using FMarkupMapKey = TVariant<FString, FName, int32>;
-
-struct FMarkupMapChange
-{
-    EMarkupMapChangeKind Kind;
-    TOptional<FMarkupMapKey> Key;
-};
-
-using FMarkupMapChangedEvent =
-    TMulticastDelegate<void(const FMarkupMapChange&)>;
-
-template<typename TItem>
-class TMarkupObservableArray
-{
-public:
-    const TArray<TItem>& GetArray() const;
-    operator const TArray<TItem>&() const;
-    FMarkupArrayChangedEvent& OnChanged();
-};
-
-template<typename TKey, typename TValue>
-class TMarkupObservableMap
-{
-public:
-    const TMap<TKey, TValue>& GetMap() const;
-    operator const TMap<TKey, TValue>&() const;
-    FMarkupMapChangedEvent& OnChanged();
-};
-
-class FMarkupObservableObject : public IMarkupObservableObject
-{
-public:
-    const IMarkupProperty* FindProperty(FName Name) const;
-    const TMap<FName, IMarkupProperty*>& GetProperties() const;
-    const FMarkupCommand* FindCommand(FName Name) const;
-    const TMap<FName, FMarkupCommand>& GetCommands() const;
-    FMarkupPropertyChangedEvent& OnPropertyChanged();
-
-protected:
-    // 以下四种形式均可用；GetterMemberFunction、SetterMemberFunction 为伪代码占位。
-    // 最终以模板重载实现，且只接受当前对象的非静态成员函数指针。
-    void RegisterProperty(FName Name, IMarkupProperty& Property);
-    void RegisterProperty(FName Name, IMarkupProperty& Property, GetterMemberFunction Getter);
-    void RegisterProperty(FName Name, IMarkupProperty& Property, nullptr_t, SetterMemberFunction Setter);
-    void RegisterProperty(FName Name, IMarkupProperty& Property, GetterMemberFunction Getter, SetterMemberFunction Setter);
-    void RegisterCommand(FName Name, FMarkupCommand Command);
-    void NotifyPropertyChanged(FStringView Path);
-};
-```
-
-`TMarkupObservableArray`、`TMarkupObservableMap` 与 `FMarkupObservableObject` 同属可观察数据模型基础层。它们必须提供与 `TArray`、`TMap` 对应的操作函数。能明确表达为新增、追加、插入、删除、替换的操作记录细粒度集合变更；排序、交换、打乱、谓词批量删除，以及返回可写元素引用、可写迭代器、可写数据指针的操作，先记录一次整体集合变更再交出可写访问。
-
-`RegisterProperty` 可将页面读写接到已登记的 Getter、Setter 成员函数：未登记的一侧直接使用属性字段，登记的一侧必须经过该成员函数。Lambda、自由函数、静态成员函数及裸 `this` 回调都不是属性访问器的登记形式。原生 C++ 模型绑定通过这些接口工作，不需要了解派生类的成员布局；`UObject` 数据上下文则由独立的反射 Adapter 直接适配为 `IMarkupFrontendObject`，不经过这些 Property 接口。
-
-`IMarkupProperty` 是所有可绑定属性的共同登记接口；标量、对象、数组和字典分别由其专有字段类型保存。`FMarkupCommand` 保存参数契约和成员函数调用描述；`FMarkupPropertyChangedEvent` 发送属性变化路径，`FMarkupArrayChangedEvent` 和 `FMarkupMapChangedEvent` 分别发送数组与 Map 的结构变化。
-
-
-#### 可观察属性
-
-`IMarkupProperty` 表示一个可以被观察的属性，目的是为了让 UI 能够捕获到可观察对象上的属性变化。
-
-**MarkupUI** 中定义了下面的观察属性方便开发者构造可观察对象：
-
-- `FMarkupProperty`: 标量属性
-- `FMarkupObjectProperty`: 对象属性
-- `FMarkupArrayProperty`: 集合（数组）属性
-- `FMarkupMapProperty`: 字典属性
-
-它们都实现 `IMarkupProperty`，因此可以以同一种方式登记到对象。
-
-> `EMarkupDataType` 只描述标量属性的值类型，不承担对象或容器的类型描述。
-> 所有属性都以 `Access` 固定可读写能力，和页面中绑定方向是两个层次的 ACL。
-
-以下是拟议的伪代码定义。它只描述公开形状，不代表最终头文件名、include、模块导出规则或 ABI。标量的类型化 Get/Set 必须与 `DataType` 匹配；对象、数组和字典的类型化接口必须与其工厂所指定的类型匹配。不匹配时在开发环境报告明确错误，写入返回失败，不进行隐式转换。
-
-```cpp
-// 伪代码：以下类型仅描述公开形状。
-
-class IMarkupObservableObject;
-class IMarkupProperty;
-class IMarkupScalarPropertyStore;
-class IMarkupObjectPropertyStore;
-class IMarkupArrayPropertyStore;
-class IMarkupMapPropertyStore;
-
-enum class EMarkupDataType : uint8
-{
-    None,
-    Bool,
-    Int32,
-    Int64,
-    Float,
-    Double,
-    String,
-    Text,
-    Name,
-    Enum,
-    Color,
-    Vector2D,
-};
-
-enum class EMarkupWriteStatus : uint8
-{
-    Accepted,
-    Rejected,
-    Corrected,
-};
-
-struct FMarkupWriteResult
-{
-    EMarkupWriteStatus Status = EMarkupWriteStatus::Accepted;
-
-    static FMarkupWriteResult Accepted();
-    static FMarkupWriteResult Rejected();
-    static FMarkupWriteResult Corrected();
-};
-
-enum class EMarkupPropertyAccess : uint8
-{
-    ReadOnly,
-    WriteOnly,
-    ReadWrite,
-};
-
-class IMarkupProperty
-{
-public:
-    virtual ~IMarkupProperty() = default;
-
-    virtual EMarkupPropertyAccess GetAccess() const = 0;
-    virtual bool CanRead() const = 0;
-    virtual bool CanWrite() const = 0;
-};
-
-class FMarkupProperty final : public IMarkupProperty
-{
-public:
-    FMarkupProperty() = default;
-
-    EMarkupDataType GetDataType() const;
-    virtual EMarkupPropertyAccess GetAccess() const override;
-    virtual bool CanRead() const override;
-    virtual bool CanWrite() const override;
-
-    // 仅供宏生成代码和内部存储层使用；手写模型使用下方的类型化 Get/Set。
-    const void* GetValuePtr() const;
-    FMarkupWriteResult SetValuePtr(const void* Value);
-
-    bool GetBool() const;
-    int32 GetInt32() const;
-    int64 GetInt64() const;
-    float GetFloat() const;
-    double GetDouble() const;
-    FString GetString() const;
-    FText GetText() const;
-    FName GetName() const;
-    int64 GetEnum() const;
-    FLinearColor GetColor() const;
-    FVector2D GetVector2D() const;
-
-    FMarkupWriteResult SetBool(bool Value);
-    FMarkupWriteResult SetInt32(int32 Value);
-    FMarkupWriteResult SetInt64(int64 Value);
-    FMarkupWriteResult SetFloat(float Value);
-    FMarkupWriteResult SetDouble(double Value);
-    FMarkupWriteResult SetString(FStringView Value);
-    FMarkupWriteResult SetText(const FText& Value);
-    FMarkupWriteResult SetName(FName Value);
-    FMarkupWriteResult SetEnum(int64 Value);
-    FMarkupWriteResult SetColor(FLinearColor Value);
-    FMarkupWriteResult SetVector2D(FVector2D Value);
-
-private:
-    // 属性字典中的副本与模型字段共享同一个存储。
-    TSharedPtr<IMarkupScalarPropertyStore> Store;
-};
-
-class FMarkupObjectProperty final : public IMarkupProperty
-{
-public:
-    virtual EMarkupPropertyAccess GetAccess() const override;
-    virtual bool CanRead() const override;
-    virtual bool CanWrite() const override;
-    IMarkupObservableObject* GetObject() const;
-
-    template<typename TObject>
-    TSharedPtr<TObject> GetObject() const;
-
-    template<typename TObject>
-    FMarkupWriteResult SetObject(TSharedPtr<TObject> Value);
-
-private:
-    TSharedPtr<IMarkupObjectPropertyStore> Store;
-};
-
-class FMarkupArrayProperty final : public IMarkupProperty
-{
-public:
-    virtual EMarkupPropertyAccess GetAccess() const override;
-    virtual bool CanRead() const override;
-    virtual bool CanWrite() const override;
-    template<typename TItem>
-    TMarkupObservableArray<TItem>& GetArray();
-
-    template<typename TItem>
-    FMarkupWriteResult SetArray(const TArray<TItem>& Value);
-
-private:
-    TSharedPtr<IMarkupArrayPropertyStore> Store;
-};
-
-class FMarkupMapProperty final : public IMarkupProperty
-{
-public:
-    virtual EMarkupPropertyAccess GetAccess() const override;
-    virtual bool CanRead() const override;
-    virtual bool CanWrite() const override;
-    template<typename TKey, typename TValue>
-    TMarkupObservableMap<TKey, TValue>& GetMap();
-
-    template<typename TKey, typename TValue>
-    FMarkupWriteResult SetMap(const TMap<TKey, TValue>& Value);
-
-private:
-    TSharedPtr<IMarkupMapPropertyStore> Store;
-};
-```
-
-#### Property Store 的类型擦除边界
-
-`IMarkupScalarPropertyStore`、`IMarkupObjectPropertyStore`、`IMarkupArrayPropertyStore` 和 `IMarkupMapPropertyStore` 都属于 Property 数据层。引入 Store 的唯一架构目的，是擦除数据模型内部的 C++ 模板类型，使公开的 `FMarkupProperty`、`FMarkupObjectProperty`、`FMarkupArrayProperty` 和 `FMarkupMapProperty` 可以保持为非模板类型。
-
-```text
-FMarkupProperty（非模板）
-    -> IMarkupScalarPropertyStore（类型擦除接口）
-        -> TMarkupScalarPropertyStore<T>（保存具体 C++ 类型）
-
-FMarkupArrayProperty（非模板）
-    -> IMarkupArrayPropertyStore（类型擦除接口）
-        -> TMarkupArrayPropertyStore<TItem>（保存具体元素类型）
-
-FMarkupMapProperty（非模板）
-    -> IMarkupMapPropertyStore（类型擦除接口）
-        -> TMarkupMapPropertyStore<TKey, TValue>（保存具体键值类型）
-```
-
-Store 可以提供完成类型擦除所必需的值类型查询和类型化存取转发，但不得承担数据上下文绑定、统一 Frontend 值转换或标记语言适配职责。Store 不知道 `SetDataContext`、RML DataModel 或 RML handle，也不实现、创建或持有任何 `IMarkupFrontend...` 接口。
-
-```cpp
-
-class IMarkupScalarPropertyStore
-{
-public:
-    virtual ~IMarkupScalarPropertyStore() = default;
-
-    virtual EMarkupDataType GetDataType() const = 0;
-    virtual EMarkupPropertyAccess GetAccess() const = 0;
-    virtual bool CanRead() const = 0;
-    virtual bool CanWrite() const = 0;
-    virtual const void* GetValuePtr() const = 0;
-    virtual FMarkupWriteResult SetValuePtr(const void* Value) = 0;
-};
-
-class IMarkupObjectPropertyStore
-{
-public:
-    virtual ~IMarkupObjectPropertyStore() = default;
-
-    virtual IMarkupObservableObject* GetObject() const = 0;
-};
-
-class IMarkupArrayPropertyStore
-{
-public:
-    virtual ~IMarkupArrayPropertyStore() = default;
-};
-
-class IMarkupMapPropertyStore
-{
-public:
-    virtual ~IMarkupMapPropertyStore() = default;
-};
-
-template<typename T>
-class TMarkupScalarPropertyStore final
-    : public IMarkupScalarPropertyStore
-{
-public:
-    explicit TMarkupScalarPropertyStore(
-        T InDefaultValue,
-        EMarkupPropertyAccess InAccess);
-
-    virtual EMarkupDataType GetDataType() const override;
-    virtual EMarkupPropertyAccess GetAccess() const override;
-    virtual bool CanRead() const override;
-    virtual bool CanWrite() const override;
-    virtual const void* GetValuePtr() const override;
-    virtual FMarkupWriteResult SetValuePtr(const void* Value) override;
-
-private:
-    T Value;
-    EMarkupPropertyAccess Access;
-};
-
-template<typename TObject>
-class TMarkupObjectPropertyStore final
-    : public IMarkupObjectPropertyStore
-{
-private:
-    TObject Value;
-};
-
-template<typename TItem>
-class TMarkupArrayPropertyStore final
-    : public IMarkupArrayPropertyStore
-{
-private:
-    TMarkupObservableArray<TItem> Value;
-};
-
-template<typename TKey, typename TValue>
-class TMarkupMapPropertyStore final
-    : public IMarkupMapPropertyStore
-{
-private:
-    TMarkupObservableMap<TKey, TValue> Value;
-};
-
-template<typename T>
-FMarkupProperty MakeMarkupProperty(
-    T InDefaultValue,
-    EMarkupPropertyAccess InAccess);
-
-template<typename TObject>
-FMarkupObjectProperty MakeMarkupObjectProperty(
-    TObject InDefaultValue,
-    EMarkupPropertyAccess InAccess);
-
-template<typename TItem>
-FMarkupArrayProperty MakeMarkupArrayProperty(
-    EMarkupPropertyAccess InAccess);
-
-template<typename TKey, typename TValue>
-FMarkupMapProperty MakeMarkupMapProperty(
-    EMarkupPropertyAccess InAccess);
-```
-
-`MakeMarkupProperty` 仅构造标量 `FMarkupProperty`，其内部为 `TMarkupScalarPropertyStore<Type>`。对象、数组和字典分别由 `MakeMarkupObjectProperty`、`MakeMarkupArrayProperty`、`MakeMarkupMapProperty` 构造专有字段；它们在当前 C++ 模块中分别创建 `TMarkupObjectPropertyStore<TObject>`、`TMarkupArrayPropertyStore<TItem>`、`TMarkupMapPropertyStore<TKey, TValue>`。`MakeMarkupArrayProperty` 和 `MakeMarkupMapProperty` 不接受默认值，创建的集合始终为空。属性字典只保存非模板的 `IMarkupProperty` 登记项。
-
-#### Frontend 数据适配边界
-
-Frontend Adapter 是独立于 Store 的胶水层。它由 `SetDataContext` 创建，通过非模板 Property 读取当前业务值，再将结果提供给具体标记语言前端：
-
-```text
-具体 C++ 值
-    -> Property Store：擦除 C++ 模板类型
-        -> 非模板 Property：组成业务数据模型
-            -> Frontend Adapter：隔离标记语言前端
-                -> RML DataModel
-```
-
-```cpp
-enum class EMarkupFrontendValueKind : uint8
-{
-    Scalar,
-    Object,
-    Array,
-    Map,
-};
-
-class IMarkupFrontendValue;
-class IMarkupFrontendScalar;
-class IMarkupFrontendObject;
-class IMarkupFrontendArray;
-class IMarkupFrontendMap;
-
-struct FMarkupValue
-{
-    explicit FMarkupValue(
-        TSharedPtr<IMarkupFrontendScalar> InScalar);
-    explicit FMarkupValue(
-        TSharedPtr<IMarkupFrontendObject> InObject);
-    explicit FMarkupValue(
-        TSharedPtr<IMarkupFrontendArray> InArray);
-    explicit FMarkupValue(
-        TSharedPtr<IMarkupFrontendMap> InMap);
-
-    EMarkupFrontendValueKind GetKind() const;
-    TSharedPtr<IMarkupFrontendValue> Get() const;
-
-private:
-    EMarkupFrontendValueKind Kind;
-    TSharedPtr<IMarkupFrontendValue> Value;
-};
-
-class IMarkupFrontendValue
-{
-public:
-    virtual ~IMarkupFrontendValue() = default;
-};
-
-class IMarkupFrontendScalar : public IMarkupFrontendValue
-{
-public:
-    virtual ~IMarkupFrontendScalar() = default;
-
-    virtual EFrontendScalarType GetValueType() const = 0;
-    virtual const void* ReadValue() const = 0;
-    virtual int32 GetValueLength() const = 0;
-    virtual bool WriteValue(
-        EFrontendScalarType Type,
-        const void* Value,
-        int32 ValueLength) = 0;
-};
-
-class IMarkupFrontendObject : public IMarkupFrontendValue
-{
-public:
-    virtual ~IMarkupFrontendObject() = default;
-
-    virtual void GetPropertyNames(
-        TArray<FString>& OutNames) const = 0;
-    virtual bool ReadProperty(
-        FStringView Name,
-        FMarkupValue& OutValue) const = 0;
-};
-
-class IMarkupFrontendArray : public IMarkupFrontendValue
-{
-public:
-    virtual ~IMarkupFrontendArray() = default;
-
-    virtual int32 Num() const = 0;
-    virtual bool ReadItem(
-        int32 Index,
-        FMarkupValue& OutValue) const = 0;
-};
-
-class IMarkupFrontendMap : public IMarkupFrontendValue
-{
-public:
-    virtual ~IMarkupFrontendMap() = default;
-
-    virtual int32 Num() const = 0;
-    virtual bool ReadPair(
-        int32 Index,
-        FMarkupMapKey& OutKey,
-        FMarkupValue& OutValue) const = 0;
-    virtual bool ReadValue(
-        const FMarkupMapKey& Key,
-        FMarkupValue& OutValue) const = 0;
-};
-
-class FMarkupFrontendScalarAdapter final
-    : public IMarkupFrontendScalar
-{
-public:
-    FMarkupFrontendScalarAdapter(
-        TWeakPtr<IMarkupObservableObject> InObject,
-        FString InPropertyName);
-
-    virtual EFrontendScalarType GetValueType() const override;
-    virtual const void* ReadValue() const override;
-    virtual int32 GetValueLength() const override;
-    virtual bool WriteValue(
-        EFrontendScalarType Type,
-        const void* Value,
-        int32 ValueLength) override;
-
-private:
-    TWeakPtr<IMarkupObservableObject> Object;
-    FString PropertyName;
-};
-
-class FMarkupFrontendArrayAdapter final
-    : public IMarkupFrontendArray
-{
-public:
-    FMarkupFrontendArrayAdapter(
-        TWeakPtr<IMarkupObservableObject> InObject,
-        FString InPropertyName);
-
-    virtual int32 Num() const override;
-    virtual bool ReadItem(
-        int32 Index,
-        FMarkupValue& OutValue) const override;
-
-private:
-    TWeakPtr<IMarkupObservableObject> Object;
-    FString PropertyName;
-};
-
-class FMarkupFrontendMapAdapter final
-    : public IMarkupFrontendMap
-{
-public:
-    FMarkupFrontendMapAdapter(
-        TWeakPtr<IMarkupObservableObject> InObject,
-        FString InPropertyName);
-
-    virtual int32 Num() const override;
-    virtual bool ReadPair(
-        int32 Index,
-        FMarkupMapKey& OutKey,
-        FMarkupValue& OutValue) const override;
-    virtual bool ReadValue(
-        const FMarkupMapKey& Key,
-        FMarkupValue& OutValue) const override;
-
-private:
-    TWeakPtr<IMarkupObservableObject> Object;
-    FString PropertyName;
-};
-```
-
-`IMarkupFrontendValue` 是 Frontend 胶水层中所有值接口的共同多态基类，只统一接口类型和生命周期表达，不负责读取、缓存或保活业务数据。`IMarkupFrontendObject`、`IMarkupFrontendScalar`、`IMarkupFrontendArray` 和 `IMarkupFrontendMap` 均继承该接口，并继续各自负责对象、标量、数组和 Map 的按需读取能力。它们把非模板 Property 数据模型适配给具体标记语言前端。
-
-`FMarkupValue` 的四个类型化构造函数在创建时写入对应的值类别。这里的 `EMarkupFrontendValueKind` 只表达草案需要的 Scalar、Object、Array 和 Map 四种概念；实际实现可以直接复用所包装前端已经提供的等价类型，不要求再定义一套枚举。`FMarkupValue::Get()` 只返回统一的 `TSharedPtr<IMarkupFrontendValue>`；由具体标记语言胶水层读取 Kind，并转换到相应接口。
-
-草案中的 `EFrontendScalarType` 是“具体前端已经提供的标量类型”的占位名称，不要求 MarkupUI 再定义一套 Scalar Type。胶水层先根据 Kind 确认值为 Scalar，再从 `IMarkupFrontendScalar::GetValueType()` 取得该前端的具体标量类型。
-
-**接口边界：**
-
-- 所有 `IMarkupFrontend...` 接口都属于数据模型胶水层，不属于 Property 数据层。
-- Frontend Adapter 由具名数据上下文建立，并通过已经登记的 Property 访问业务数据。
-- Property 和 Property Store 不得实现、持有或返回任何 `IMarkupFrontend...` 接口。
-- Adapter 不包含 RML 类型。RML 胶水实现只消费通用 Frontend 接口，并立即把结果转换为 RML 自己的值表示。
-
-**稳定模型槽与空模型：**
-
-- Frontend 胶水层按模型名维护稳定的模型槽。
-- RML 加载时遇到尚未设置业务对象的 `data-model`，胶水层仍为该名称建立空模型槽，元素绑定不会因为业务对象尚未就绪而失败。
-- 空模型槽不保存虚构的业务默认值。属性、对象和集合读取返回无值，写入与命令调用返回未处理，并且不重复输出错误日志。
-- 创建 RmlUi DataModel 时启用 `allow_missing_variables`。尚未绑定的变量会静默产生默认值，并且允许在文档加载后补充绑定。
-- Object 挂载后，Frontend Adapter 将它公开的顶层 Property 绑定到既有 DataModel，并逐个标记新绑定的顶层变量为脏；下一次更新会恢复依赖这些变量的绑定。
-- 这个机制使用 RmlUi 原生的延迟变量绑定能力，不要求 Property、Store 或 C API 实现另一套动态根字段解析。
-- `SetDataContext(Name, Object)` 为同名模型槽设置或替换 Object Adapter，不替换 RML 已持有的模型槽。
-
-**Adapter 的读取与生命周期：**
-
-- Adapter 只保存业务对象的弱引用和属性名，不保存属性值，也不长期保活业务对象。
-- 每次前端请求值时，对应 Adapter 都在该函数内部重新解析弱引用。原生 C++ 对象在本次同步调用开始时执行 `Pin()`，并只由函数内的局部强引用保持到函数返回；不存在跨 Adapter 或跨回调统一管理生命周期的读取 Scope。
-- `UObject` Adapter 在游戏线程内为本次同步调用检查弱引用并立即完成反射读取，不把解析出的 `UObject*` 保存到调用结束之后。
-- 模型槽和 Adapter 可以与当前前端数据模型保持相同生命周期；业务对象和 Property 失效后，本次读取返回无值。
-- `FMarkupValue` 的共享引用只保活 Frontend Adapter。它不保活 Adapter 背后的业务对象，也不把一次读取到的业务值变成长期缓存。
-
-**`FMarkupValue` 与 C ABI：**
-
-- `FMarkupValue` 只存在于 Frontend 数据适配边界，不是 Property 或 Store 的存储形式。
-- 它持有一个统一的 `TSharedPtr<IMarkupFrontendValue>`，只保证 Frontend Adapter 自身的生命周期，不保存属性值，也不保活业务对象。
-- Scalar、Object、Array 和 Map 分别通过对应的 `IMarkupFrontend...` Adapter 表示；具体接口判断只在标记语言胶水层进行。
-- Adapter 每次被读取时仍然实时解析其弱引用数据源；缓存或复制 `FMarkupValue` 不会缓存业务值。
-- `FMarkupValue` 不直接作为任何具体前端的 ABI 参数。前端边界使用该前端已经定义的带标签标量值结构。
-- 标量通过 C API 按值传递，字符串通过数据指针和长度传递，对象、数组和 Map 通过不透明句柄与读取回调传递。
-- C API 入口和出口负责值转换；模板、`TSharedPtr`、`TVariant` 和 UE 容器不得穿过动态库边界。
-
-**集合适配规则：**
-
-- `FMarkupArrayProperty` 和 `FMarkupMapProperty` 本身不带元素、键或值的模板参数；具体 C++ 类型只保留在对应的 Property Store 中。
-- Frontend Adapter 解析对应 Property，再通过非模板的 `IMarkupFrontendArray` 或 `IMarkupFrontendMap` 提供数量、元素和键值对。RML 不接触 `TArray`、`TMap`、`TSharedPtr` 或模板类型。
-- `TMarkupObservableArray` 和 `TMarkupObservableMap` 不能直接设置为数据上下文。`SetDataContext` 只接受可观察 Object，集合必须登记为该 Object 的 Array 或 Map Property。
-- Adapter 从对象属性访问原有可观察集合，不复制集合内容。
-- 集合元素和 Map 值的支持范围见文末“集合元素支持范围”两张表；Map 键只支持 `FString`、`FName` 和 `int32`。
-- 首版不支持数组嵌套数组、数组嵌套 Map，或以集合为 Map 值。需要这些层级时，必须通过可观察对象属性包裹下一层集合。
-- 首版 Frontend 只读取集合，不提供整体写回数组或 Map 的入口。C++ 通过类型化 `SetArray`、`SetMap` 替换集合内容；页面通过可绑定命令表达新增、删除或替换意图。
-
-**Property 访问规则：**
-
-- 字段内部使用类型化 Store。模型类通过标量的 `GetXxx` / `SetXxx`、对象的 `GetObject` / `SetObject`，以及集合的 `GetArray` / `SetArray`、`GetMap` / `SetMap` 访问数据。
-- Frontend Adapter 始终通过登记项访问 Property。
-- `RegisterProperty` 登记了 Getter 时，Frontend 读取必须调用 Getter；登记了 Setter 时，Frontend 写入必须调用 Setter；未登记的一侧才由 Property 直接读写 Store。
-- 属性宏负责生成字段、配置 `Access`，并决定类对外公开哪一侧接口。
-- 标量和对象属性宏的最后一个参数可以是 `DefaultValue`；Array 和 Map 属性不接受默认值，构造后初始为空。
-- 开发者不应手写 `XxxProperty` 字段：
-
-| 类定义宏 | 宏生成的受保护字段 | 宏生成的公开 C++ 接口 |
-| --- | --- | --- |
-| `MARKUP_PROPERTY(float, MusicVolume[, DefaultValue])` | `FMarkupProperty MusicVolumeProperty` | `GetMusicVolume()`、`SetMusicVolume(float)` |
-| `MARKUP_PROPERTY_READONLY(FString, PlayerId[, DefaultValue])` | `FMarkupProperty PlayerIdProperty` | `GetPlayerId()` |
-| `MARKUP_PROPERTY_WRITEONLY(FString, SearchQuery[, DefaultValue])` | `FMarkupProperty SearchQueryProperty` | `SetSearchQuery(FString)` |
-
-类自身及其派生类可通过受保护字段调用与 `DataType` 对应的 Get/Set；对外暴露的 Getter、Setter 则严格由宏声明决定。`MARKUP_PROPERTY_READONLY` 不自动生成 `SetXxx` 成员函数，`MARKUP_PROPERTY_WRITEONLY` 不自动生成 `GetXxx` 成员函数；开发者仍可自行声明和实现 `SetXxx` 或 `GetXxx` 作为额外包装。`ReadOnly`、`WriteOnly` 与 `ReadWrite` 是模型字段能力，不描述页面是否刷新。
-
-根对象设置为数据上下文后，插件从字典递归取得属性：`Name` 是根对象中的对象属性，`First` 是其子对象中的属性。因此页面可使用 `{{ Name.First }}`、`{{ Weight }}` 和 `{{ PlayerId }}`。若内容规范要求小写名称，使用额外的命名变体宏即可；默认名称始终与 C++ 属性名一致。
-
-```cpp
-class FNameUiState final : public FMarkupObservableObject
-{
-public:
-    FNameUiState()
-    {
-        RegisterProperty(TEXT("First"), FirstProperty, &FNameUiState::GetFirst, &FNameUiState::SetFirst);
-        RegisterProperty(TEXT("Last"), LastProperty, &FNameUiState::GetLast, &FNameUiState::SetLast);
-    }
-
-    MARKUP_PROPERTY(FString, First, TEXT(""))
-    MARKUP_PROPERTY(FString, Last, TEXT(""))
-};
+#include "DataBinding/MarkupObservableObject.h"
 
 class FPlayerUiState final : public FMarkupObservableObject
 {
 public:
     FPlayerUiState()
     {
-        RegisterProperty(TEXT("Name"), NameProperty, &FPlayerUiState::GetName, &FPlayerUiState::SetName);
-        RegisterProperty(TEXT("Weight"), WeightProperty, &FPlayerUiState::GetWeight, &FPlayerUiState::SetWeight);
-        RegisterProperty(TEXT("PlayerId"), PlayerIdProperty, &FPlayerUiState::GetPlayerId);
+        RegisterProperty(TEXT("Health"), HealthProperty);
+        RegisterProperty(TEXT("DisplayName"), DisplayNameProperty);
     }
 
-    MARKUP_OBJECT_PROPERTY(TSharedPtr<FNameUiState>, Name, nullptr)
-    MARKUP_PROPERTY(float, Weight, 0.0f)
-    MARKUP_PROPERTY_READONLY(FString, PlayerId, TEXT(""))
+    int32 GetHealth() const { return GetValue(HealthProperty); }
+    void SetHealth(int32 Value) { SetValue(HealthProperty, Value); }
+    const FString& GetDisplayName() const { return GetValue(DisplayNameProperty); }
+    void SetDisplayName(const FString& Value) { SetValue(DisplayNameProperty, Value); }
+
+private:
+    TMarkupProperty<int32> HealthProperty = TMarkupProperty<int32>(100);
+    TMarkupProperty<FString> DisplayNameProperty = TMarkupProperty<FString>(FString(TEXT("Player")));
 };
 
-TSharedRef<FPlayerUiState> Player = MakeShared<FPlayerUiState>();
-Ui->GetDocument()->SetDataContext(TEXT("player"), Player);
-```
-
-##### 宏写法与不用宏的对照
-
-开发者在构造函数中显式登记属性，再在类中声明属性：
-
-```cpp
-class FNameUiState final : public FMarkupObservableObject
+class FPartyUiState final : public FMarkupObservableObject
 {
 public:
-    FNameUiState()
+    FPartyUiState()
     {
-        RegisterProperty(TEXT("First"), FirstProperty, &FNameUiState::GetFirst, &FNameUiState::SetFirst);
-        RegisterProperty(TEXT("Last"), LastProperty, &FNameUiState::GetLast, &FNameUiState::SetLast);
+        RegisterProperty(TEXT("Player"), PlayerProperty);
     }
 
-    MARKUP_PROPERTY(FString, First, TEXT(""))
-    MARKUP_PROPERTY(FString, Last, TEXT(""))
+    void SetPlayer(const TSharedPtr<FPlayerUiState>& Value)
+    {
+        SetValue(PlayerProperty, Value);
+    }
+
+private:
+    TMarkupProperty<TSharedPtr<FPlayerUiState>> PlayerProperty = TMarkupProperty<TSharedPtr<FPlayerUiState>>(TSharedPtr<FPlayerUiState>());
 };
 ```
 
-以下是宏的概念展开。它展示宏生成的 `FMarkupProperty` 字段、构造函数登记和公开 Getter/Setter；它不是要求开发者手写的第二套数据字段：
+例如 `Party->SetPlayer(Player)` 后，模型内的 `Player.Health` 访问子对象属性。子对象自身调用 `SetHealth` 会发出自己的变化通知；父对象替换 `Player` 则通知父属性。业务对象的共享引用由业务侧管理，绑定本身不替业务侧长期保活对象。
+
+### 集合属性与显式通知
+
+普通 `TArray/TMap` 与 `TMarkupObservableArray/Map` 都可以放入 `TMarkupProperty<T>`。前者要求业务代码显式通知，后者的可通知修改操作会发布集合变化。可观察容器暴露可写存储时采用保守 Reset；长期保存引用并在以后修改，仍不能期待容器侦测每一次外部写入。普通容器的下标写入则需要显式通知。
 
 ```cpp
-class FNameUiState final : public FMarkupObservableObject
+#include "DataBinding/MarkupObservableArray.h"
+#include "DataBinding/MarkupObservableMap.h"
+#include "DataBinding/MarkupNotifyUtilities.h"
+
+class FInventoryUiState final : public FMarkupObservableObject
 {
 public:
-    FNameUiState()
+    FInventoryUiState()
     {
-        RegisterProperty(TEXT("First"), FirstProperty, &FNameUiState::GetFirst, &FNameUiState::SetFirst);
-        RegisterProperty(TEXT("Last"), LastProperty, &FNameUiState::GetLast, &FNameUiState::SetLast);
+        RegisterProperty(TEXT("Gold"), GoldProperty);
+        RegisterProperty(TEXT("Items"), ItemsProperty);
+        RegisterProperty(TEXT("ItemCounts"), ItemCountsProperty);
+        RegisterProperty(TEXT("Tags"), TagsProperty);
     }
 
-    FString GetFirst() const
+    int32 GetGold() const { return GetValue(GoldProperty); }
+    void SetGold(int32 Value) { SetValue(GoldProperty, Value); }
+
+    void AddItem(const FString& Item)
     {
-        return FirstProperty.GetString();
+        GetMutableValue(ItemsProperty).Add(Item);
     }
 
-    void SetFirst(FString InFirst)
+    void SetItemCount(const FString& Key, int32 Count)
     {
-        FirstProperty.SetString(InFirst);
+        GetMutableValue(ItemCountsProperty).Add(Key, Count);
     }
 
-    FString GetLast() const
+    void AddTag(const FString& Tag)
     {
-        return LastProperty.GetString();
+        TArray<FString>& Tags = GetMutableValue(TagsProperty);
+        Tags.Add(Tag);
+        MarkupUI::NotifyArrayAdded(Tags);
     }
 
-    void SetLast(FString InLast)
-    {
-        LastProperty.SetString(InLast);
-    }
-
-protected:
-    FMarkupProperty FirstProperty = MakeMarkupProperty<FString>(TEXT(""), EMarkupPropertyAccess::ReadWrite);
-    FMarkupProperty LastProperty = MakeMarkupProperty<FString>(TEXT(""), EMarkupPropertyAccess::ReadWrite);
+private:
+    TMarkupProperty<int32> GoldProperty = TMarkupProperty<int32>(0);
+    TMarkupProperty<TMarkupObservableArray<FString>> ItemsProperty = TMarkupProperty<TMarkupObservableArray<FString>>(TMarkupObservableArray<FString>());
+    TMarkupProperty<TMarkupObservableMap<FString, int32>> ItemCountsProperty = TMarkupProperty<TMarkupObservableMap<FString, int32>>(TMarkupObservableMap<FString, int32>());
+    TMarkupProperty<TArray<FString>> TagsProperty = TMarkupProperty<TArray<FString>>(TArray<FString>());
 };
 ```
 
-`RegisterProperty(TEXT("First"), FirstProperty, &FNameUiState::GetFirst, &FNameUiState::SetFirst)` 是读写属性的标准登记方式；它把名称、已定义的属性字段和对象成员访问函数登记到基类字典。基类在此处连接属性变化回调；`FMarkupProperty` 负责类型检查、固定的类型比较和写入。因此无论 C++ 调用还是页面写入，都会经过 `SetFirst`：第一次调用改变值并发出一次通知；第二次传入相同值时不发通知。手写 Setter 无需自行比较或调用 `NotifyPropertyChanged`。
+集合必须是已登记对象属性中的原集合，不能用复制出来的临时集合通知原属性。普通集合通知按已观察到的集合定位订阅；页面尚未读取的路径没有刷新需求。Map 的数据访问和通知能力不等于 RML 已有完整字典表达式语法，见后文边界。
 
-若 Getter、Setter 均未登记，页面读取和写回都会跳过类中同名的 `GetFirst`、`SetFirst`，直接读写 `FirstProperty`：
+### 命令登记与调用
 
-```cpp
-RegisterProperty(TEXT("First"), FirstProperty, nullptr, nullptr);
-```
-
-#### 数组属性
-
-数组属性使用下列宏：
+`FromMember` 必须同时接收共享 Owner 和成员函数指针。因此属性可以在构造函数中注册，命令要在对象已经由共享指针管理后注册，不能在构造函数里调用 `AsShared()`。
 
 ```cpp
-MARKUP_ARRAY_PROPERTY(ElementType, Name)
-MARKUP_ARRAY_PROPERTY_READONLY(ElementType, Name)
-MARKUP_ARRAY_PROPERTY_WRITEONLY(ElementType, Name)
-```
-
-无后缀宏表示读写；`_READONLY` 与 `ReadOnly` 访问登记配对，只自动公开读取和页面读取；`_WRITEONLY` 与 `WriteOnly` 访问登记配对，只自动公开写入。`_READONLY` 不生成 `SetXxx`，`_WRITEONLY` 不生成 `GetXxx`；如业务代码仍需要另一侧的便利接口，可以自行包装。
-
-以下两种写法都定义一个读写的 `Items` 数组属性，元素类型为 `FItemView`。
-
-```cpp
-class FInventoryArrayUiState final : public FMarkupObservableObject
-{
-public:
-    FInventoryArrayUiState()
-    {
-        RegisterProperty(TEXT("Items"), ItemsProperty, &FInventoryArrayUiState::GetItems, &FInventoryArrayUiState::SetItems);
-    }
-
-    MARKUP_ARRAY_PROPERTY(FItemView, Items)
-};
-```
-
-不用宏时，等价的完整声明如下：
-
-```cpp
-class FInventoryArrayUiState final : public FMarkupObservableObject
-{
-public:
-    FInventoryArrayUiState()
-    {
-        RegisterProperty(TEXT("Items"), ItemsProperty, &FInventoryArrayUiState::GetItems, &FInventoryArrayUiState::SetItems);
-    }
-
-    TMarkupObservableArray<FItemView>& GetItems()
-    {
-        return ItemsProperty.GetArray<FItemView>();
-    }
-
-    void SetItems(const TArray<FItemView>& InItems)
-    {
-        ItemsProperty.SetArray(InItems);
-    }
-
-protected:
-    FMarkupArrayProperty ItemsProperty = MakeMarkupArrayProperty<FItemView>(EMarkupPropertyAccess::ReadWrite);
-};
-```
-
-数组属性的 `GetItems()` 与 `SetItems()` 不对称：Getter 返回 `TMarkupObservableArray<FItemView>&`，以便后续数组操作保留变化通知；Setter 接收原生 `TArray<FItemView>`，将其值复制到现有可观察数组。
-
-#### 字典属性
-
-字典属性使用下列宏：
-
-```cpp
-MARKUP_MAP_PROPERTY(KeyType, ValueType, Name)
-MARKUP_MAP_PROPERTY_READONLY(KeyType, ValueType, Name)
-MARKUP_MAP_PROPERTY_WRITEONLY(KeyType, ValueType, Name)
-```
-
-以下两种写法都定义一个读写的 `ItemCounts` 字典属性，键为 `FName`，值为 `int32`。
-
-```cpp
-class FInventoryMapUiState final : public FMarkupObservableObject
-{
-public:
-    FInventoryMapUiState()
-    {
-        RegisterProperty(TEXT("ItemCounts"), ItemCountsProperty, &FInventoryMapUiState::GetItemCounts, &FInventoryMapUiState::SetItemCounts);
-    }
-
-    MARKUP_MAP_PROPERTY(FName, int32, ItemCounts)
-};
-```
-
-不用宏时，等价的完整声明如下：
-
-```cpp
-class FInventoryMapUiState final : public FMarkupObservableObject
-{
-public:
-    FInventoryMapUiState()
-    {
-        RegisterProperty(TEXT("ItemCounts"), ItemCountsProperty, &FInventoryMapUiState::GetItemCounts, &FInventoryMapUiState::SetItemCounts);
-    }
-
-    TMarkupObservableMap<FName, int32>& GetItemCounts()
-    {
-        return ItemCountsProperty.GetMap<FName, int32>();
-    }
-
-    void SetItemCounts(const TMap<FName, int32>& InItemCounts)
-    {
-        ItemCountsProperty.SetMap(InItemCounts);
-    }
-
-protected:
-    FMarkupMapProperty ItemCountsProperty = MakeMarkupMapProperty<FName, int32>(EMarkupPropertyAccess::ReadWrite);
-};
-```
-
-字典属性的 `GetItemCounts()` 与 `SetItemCounts()` 不对称：Getter 返回 `TMarkupObservableMap<FName, int32>&`，以便后续字典操作保留变化通知；Setter 接收原生 `TMap<FName, int32>`，将其值复制到现有可观察字典。
-
-#### 嵌套对象
-
-对象属性使用下列宏：
-
-```cpp
-MARKUP_OBJECT_PROPERTY(Type, Name[, DefaultValue])
-MARKUP_OBJECT_PROPERTY_READONLY(Type, Name[, DefaultValue])
-MARKUP_OBJECT_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])
-```
-
-以下两种写法都定义三个读写属性：对象 `Name`、对象数组 `PartyMembers`，以及以槽位编号为键的对象字典 `MembersBySlot`。
-
-```cpp
-class FPlayerRelationsUiState final : public FMarkupObservableObject
-{
-public:
-    FPlayerRelationsUiState()
-    {
-        RegisterProperty(TEXT("Name"), NameProperty, &FPlayerRelationsUiState::GetName, &FPlayerRelationsUiState::SetName);
-        RegisterProperty(TEXT("PartyMembers"), PartyMembersProperty, &FPlayerRelationsUiState::GetPartyMembers, &FPlayerRelationsUiState::SetPartyMembers);
-        RegisterProperty(TEXT("MembersBySlot"), MembersBySlotProperty, &FPlayerRelationsUiState::GetMembersBySlot, &FPlayerRelationsUiState::SetMembersBySlot);
-    }
-
-    MARKUP_OBJECT_PROPERTY(TSharedPtr<FNameUiState>, Name, nullptr)
-    MARKUP_ARRAY_PROPERTY(TSharedPtr<FNameUiState>, PartyMembers)
-    MARKUP_MAP_PROPERTY(int32, TSharedPtr<FNameUiState>, MembersBySlot)
-};
-```
-
-不用宏时，等价的完整声明如下：
-
-```cpp
-class FPlayerRelationsUiState final : public FMarkupObservableObject
-{
-public:
-    FPlayerRelationsUiState()
-    {
-        RegisterProperty(TEXT("Name"), NameProperty, &FPlayerRelationsUiState::GetName, &FPlayerRelationsUiState::SetName);
-        RegisterProperty(TEXT("PartyMembers"), PartyMembersProperty, &FPlayerRelationsUiState::GetPartyMembers, &FPlayerRelationsUiState::SetPartyMembers);
-        RegisterProperty(TEXT("MembersBySlot"), MembersBySlotProperty, &FPlayerRelationsUiState::GetMembersBySlot, &FPlayerRelationsUiState::SetMembersBySlot);
-    }
-
-    TSharedPtr<FNameUiState> GetName() const
-    {
-        return NameProperty.GetObject<FNameUiState>();
-    }
-
-    void SetName(TSharedPtr<FNameUiState> InName)
-    {
-        NameProperty.SetObject(MoveTemp(InName));
-    }
-
-    TMarkupObservableArray<TSharedPtr<FNameUiState>>& GetPartyMembers()
-    {
-        return PartyMembersProperty.GetArray<TSharedPtr<FNameUiState>>();
-    }
-
-    void SetPartyMembers(const TArray<TSharedPtr<FNameUiState>>& InPartyMembers)
-    {
-        PartyMembersProperty.SetArray(InPartyMembers);
-    }
-
-    TMarkupObservableMap<int32, TSharedPtr<FNameUiState>>& GetMembersBySlot()
-    {
-        return MembersBySlotProperty.GetMap<int32, TSharedPtr<FNameUiState>>();
-    }
-
-    void SetMembersBySlot(const TMap<int32, TSharedPtr<FNameUiState>>& InMembersBySlot)
-    {
-        MembersBySlotProperty.SetMap(InMembersBySlot);
-    }
-
-protected:
-    FMarkupObjectProperty NameProperty = MakeMarkupObjectProperty<TSharedPtr<FNameUiState>>(nullptr, EMarkupPropertyAccess::ReadWrite);
-    FMarkupArrayProperty PartyMembersProperty = MakeMarkupArrayProperty<TSharedPtr<FNameUiState>>(EMarkupPropertyAccess::ReadWrite);
-    FMarkupMapProperty MembersBySlotProperty = MakeMarkupMapProperty<int32, TSharedPtr<FNameUiState>>(EMarkupPropertyAccess::ReadWrite);
-};
-```
-
-对象 Setter 替换整个对象引用；数组和字典 Setter 将传入的 `TArray`、`TMap` 值复制到原有受管集合中，不替换集合对象。手写对象属性使用 `FMarkupObjectProperty` 与 `GetObject<T>` / `SetObject<T>`，数组属性使用 `FMarkupArrayProperty` 与 `GetArray<T>` / `SetArray<T>`，字典属性使用 `FMarkupMapProperty` 与 `GetMap<TKey, TValue>` / `SetMap<TKey, TValue>`。读写属性将对应的成员 Getter、Setter 传给 `RegisterProperty`，使页面与 C++ 共用同一访问路径。
-
-`TMarkupObservableArray` 和 `TMarkupObservableMap` 分别提供与 `TArray`、`TMap` 对应的受管操作及变化事件。数组的增加、追加、插入、删除和替换，以及字典的新增、替换和删除，都会保留具体变化信息；调用会使集合重排或无法保留细节的操作时，集合发出整体变化。属性登记后，集合变化会转发为所属对象的属性变化。
-
-#### 设置数据上下文
-
-将根对象设为文档数据上下文后，`FMarkupObservableObject` 的访问器字典提供其属性、对象和数组：
-
-```cpp
-TSharedRef<FPlayerUiState> Player = MakeShared<FPlayerUiState>();
-Ui->GetDocument()->SetDataContext(TEXT("player"), Player);
-
-Player->GetName()->SetFirst(TEXT("Ada"));
-```
-
-`MARKUP_OBJECT_PROPERTY` 要求对象本身也是可观察对象；构造函数中的 `RegisterProperty` 负责登记属性及其 Getter、Setter 成员函数。替换 `Name` 对象时，它通知 `Name`；子对象的 `First` 改变时，父对象转发为 `Name.First`。注册给 RmlUi 的内部数据模型时，最终仍聚合为所属具名数据上下文顶层字段的脏标记。
-
-可绑定属性不提供自定义比较器。标量属性使用框架固定的同类型相等判断；对象属性与集合属性只比较共享引用身份。替换为同一引用时不通知；对象内部属性变化和集合内部受管变更分别由对象、集合自身的变化事件转发。
-
-### 集合操作与复杂写入
-
-模型挂载时指定根对象即可：
-
-```cpp
-Ui->GetDocument()->SetDataContext(
-    TEXT("inventory"),
-    InventoryState);
-```
-
-若属性的 Setter 包含钳制、校验或联动其他状态，页面写入会经过这个 Setter，与 C++ 业务调用保持一致。需要执行“保存”“购买”等独立意图时仍应使用可绑定命令。纯 `WriteOnly` 字段不可作为原生 `data-value` 或 `data-checked` 的目标，因为两者都需要读取字段值；这类输入应使用 `data-event-*` 命令提交。
-
-### 可绑定命令
-
-命令与属性一样是模型中的受控描述，而不是把成员函数直接暴露给页面。命令在构造函数中显式登记，避免字符串名称、参数表和成员函数各写一遍；`FMarkupCommand` 保存命令名、参数契约与调用函数，只有登记后的命令才能从 RML 调用。
-
-```cpp
-class FMarkupCommand
-{
-public:
-    template<typename TObject, typename... TArguments>
-    static FMarkupCommand FromMember(
-        void (TObject::*MemberFunction)(TArguments...));
-};
-
 class FInventoryCommandUiState final : public FMarkupObservableObject
 {
 public:
     FInventoryCommandUiState()
     {
-        RegisterProperty(
-            TEXT("SelectedItemId"),
-            SelectedItemIdProperty,
-            &FInventoryCommandUiState::GetSelectedItemId,
-            &FInventoryCommandUiState::SetSelectedItemId);
-        RegisterCommand(TEXT("select_item"), SelectItemCommand);
-        RegisterCommand(TEXT("request_close"), RequestCloseCommand);
+        RegisterProperty(TEXT("SelectedItem"), SelectedItemProperty);
     }
 
-    void SelectItem(const FString& ItemId)
+    static TSharedRef<FInventoryCommandUiState> Create()
     {
-        SetSelectedItemId(ItemId);
+        TSharedRef<FInventoryCommandUiState> State = MakeShared<FInventoryCommandUiState>();
+        State->RegisterCommand(TEXT("SelectItem"), FMarkupCommand::FromMember(State, &FInventoryCommandUiState::SelectItem));
+        State->RegisterCommand(TEXT("RequestClose"), FMarkupCommand::FromMember(State, &FInventoryCommandUiState::RequestClose));
+        return State;
+    }
+
+    void SelectItem(int32 ItemId)
+    {
+        SetValue(SelectedItemProperty, ItemId);
     }
 
     void RequestClose()
@@ -1105,48 +247,22 @@ public:
         OnCloseRequested.ExecuteIfBound();
     }
 
-protected:
-    MARKUP_PROPERTY(FString, SelectedItemId, TEXT(""))
-
-    FMarkupCommand SelectItemCommand = FMarkupCommand::FromMember(&FInventoryCommandUiState::SelectItem);
-    FMarkupCommand RequestCloseCommand = FMarkupCommand::FromMember(&FInventoryCommandUiState::RequestClose);
     FSimpleDelegate OnCloseRequested;
+
+private:
+    TMarkupProperty<int32> SelectedItemProperty = TMarkupProperty<int32>(INDEX_NONE);
 };
+
+TSharedRef<FInventoryCommandUiState> Commands = FInventoryCommandUiState::Create();
+if (const FMarkupCommand* Command = Commands->GetCommandByName(TEXT("SelectItem")))
+{
+    const FString& Signature = Command->GetSignature();
+    TConstArrayView<FMarkupCommandParameter> Parameters = Command->GetParameters();
+    Command->Exec(int32(42));
+}
 ```
 
-命令先作为 `FMarkupCommand` 成员字段声明，再由构造函数中的 `RegisterCommand` 登记。字段只能通过 `FMarkupCommand::FromMember` 绑定非静态成员函数，不提供 Lambda、自由函数或裸 `this` 回调入口。它由成员函数签名生成命令描述，推导参数数量和类型，并在编译期拒绝输出参数、非常量引用、`UObject` 指针、潜伏任务和不支持的值类型。命令描述本身只保存成员函数信息；模型挂载后，基类以弱引用关联模型，在调用时先锁定 `TSharedPtr`，成功后才调用成员函数。反射命令与蓝图命令都必须转换成同一份已验证的命令描述，不能跳过这层检查。
-
-当类中存在多个函数重载时，显式选择接收字符串的签名：
-
-```cpp
-void SelectItem(const FString& ItemId);
-void SelectItem(int32 ItemIndex);
-
-FMarkupCommand SelectItemCommand = FMarkupCommand::FromMember(static_cast<void (FInventoryCommandUiState::*)(const FString&)>(&FInventoryCommandUiState::SelectItem));
-```
-
-命令参数覆盖 RmlUi 表达式能够传递的全部值类型：
-
-- `bool`、
-- `int32`
--`int64`
-- `float`
-- `double`。
-- `FString`
-- `FText` 
-- `FName`。
-- 枚举。
-- `FLinearColor`  
-- `FVector2D`。
-
-Object、Array 和 Map 不能整体作为命令参数传递；它们可以参与表达式导航，并将其内部的值传给命令：
-
-```html
-<button data-event-click="select_item(items[index].id)">Select</button>
-<button data-event-click="apply_color(theme.accent)">Apply color</button>
-```
-
-命令只对应 `command(...)` 形式的函数调用表达式。`property = value` 仍是属性写入，不会被当作命令；无参命令也必须写出括号，例如 `save()`。
+`GetAllCommands()`、`GetCommandByName()` 提供查询；命令自己提供参数描述、签名与 `Exec`。命令弱引用 Owner，不能借此长期保活模型。RML 的命令在设置上下文时登记，缺失命令不使用空槽延迟补造；替换上下文时旧命令清理后登记新命令。
 
 #### 命令签名硬性契约
 
@@ -1156,7 +272,7 @@ Object、Array 和 Map 不能整体作为命令参数传递；它们可以参与
 - **调用前参数检查：** 每次 RML 调用命令时，必须先检查实际参数数量、值类型以及转换结果是否与已确定的成员函数签名匹配。只有全部参数通过检查后才能进入成员函数。
 
 - 同一个可观察对象的命令名必须唯一。`RegisterCommand` 不允许重复登记，也不采用覆盖或“最后一个生效”语义；基类和派生类最终形成的命令表同样不能重名。不同具名 DataModel 之间可以使用同名命令。
-- 只有直接作为具名 DataContext 根对象的 `FMarkupObservableObject` 所登记的命令才能被 RML 调用。嵌套对象、Array 元素或 Map 值中的可观察对象即使登记了命令，这些命令也不会暴露给该 DataModel。RML 可以从这些叶子对象中读取值作为根命令的参数，但不能通过对象路径调用叶子命令。
+- 只有直接作为具名 DataContext 根对象的 `MarkupUI::DataBinding::IObservableObject` 所公开的命令才能被 RML 调用。嵌套对象、Array 元素或 Map 值中的可观察对象即使登记了命令，这些命令也不会暴露给该 DataModel。RML 可以从这些叶子对象中读取值作为根命令的参数，但不能通过对象路径调用叶子命令。
 - 命令只能绑定非静态成员函数，返回类型必须是 `void`。RmlUi 原生事件回调没有命令返回值，因此不扩展额外的返回值语义。
 - RML 传入的参数数量必须与成员函数签名完全一致。任何参数缺失或多余都拒绝调用。
 - 不支持 C++ 默认参数。即使成员函数声明了默认值，RML 也必须显式传入全部参数。
@@ -1164,33 +280,42 @@ Object、Array 和 Map 不能整体作为命令参数传递；它们可以参与
 - 字符串值可以按成员函数签名转换为 `FString`、`FText` 或 `FName`，不支持字符串指针或其他隐式字符串类型。
 - 数字参数使用 C++ `static_cast` 的转换语义。整数收窄、浮点精度收窄以及浮点数转整数可以产生截断或精度损失，框架不承诺保持原值精度。只有当转换会进入 C++ 未定义行为时才拒绝调用。
 - 枚举参数只接受没有小数部分且位于枚举底层整数类型范围内的数值。存在 UE 枚举元数据时，还必须是已声明的枚举项；普通 C++ 枚举无法通用地判定稀疏枚举项，因此只保证底层整数范围正确。
-- `FLinearColor` 和 `FVector2D` 只接受对应的 RmlUi 值类型，不从字符串或数字参数猜测构造。
+- `FLinearColor`、`FVector2D`、`FVector3f` 和 `FVector` 只接受对应的 RmlUi 值类型，不从字符串或数字参数猜测构造。两种三维向量可相互赋值及传参；经过 RML 时使用 float 精度，因此 `FVector` 的 double 分量可能发生精度收窄。
 - 重载成员函数必须在 `FromMember` 调用处使用 `static_cast` 明确选择签名，不提供按 RML 运行时参数自动选择 C++ 重载的机制。
 - 参数数量或类型检查失败时，命令不执行；不使用默认值补齐，也不截断多余参数。
 
+重载成员函数在创建命令时明确选定签名，例如：
 
+```cpp
+class FSelectionUiState final : public FMarkupObservableObject
+{
+public:
+    void SelectItem(int32 ItemId) { /* 按编号处理选择。 */ }
+    void SelectItem(const FString& ItemName) { /* 按名称处理选择。 */ }
+};
 
-### 宏总表
+TSharedRef<FSelectionUiState> Selection = MakeShared<FSelectionUiState>();
+FMarkupCommand SelectById = FMarkupCommand::FromMember(
+    Selection,
+    static_cast<void (FSelectionUiState::*)(int32)>(&FSelectionUiState::SelectItem));
+SelectById.Exec(int32(42));
+```
 
-| 类定义宏 | 解决的问题 | 是否可被反射/蓝图复用 |
-| --- | --- | --- |
-| `MARKUP_PROPERTY(Type, Name[, DefaultValue])` | 生成受保护的属性字段、Getter、Setter。 | 是；反射层可将其描述为普通字段。 |
-| `MARKUP_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 生成受保护的属性字段和公开 Getter；不生成 Setter。 | 是。 |
-| `MARKUP_OBJECT_PROPERTY(Type, Name[, DefaultValue])` | 声明嵌套对象属性。 | 是。 |
-| `MARKUP_OBJECT_PROPERTY_READONLY(Type, Name[, DefaultValue])` | 声明只读嵌套对象属性；不生成 Setter。 | 是。 |
-| `MARKUP_OBJECT_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 声明仅可替换整个对象的属性；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
-| `MARKUP_ARRAY_PROPERTY(Type, Name)` | 声明初始为空的受管集合属性。 | 是。 |
-| `MARKUP_ARRAY_PROPERTY_READONLY(Type, Name)` | 声明初始为空的只读受管集合属性；不生成 Setter。 | 是。 |
-| `MARKUP_ARRAY_PROPERTY_WRITEONLY(Type, Name)` | 声明初始为空、仅可替换整个受管数组的属性；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
-| `MARKUP_MAP_PROPERTY(KeyType, ValueType, Name)` | 声明初始为空的受管字典属性。 | 是。 |
-| `MARKUP_MAP_PROPERTY_READONLY(KeyType, ValueType, Name)` | 声明初始为空的只读受管字典属性；不生成 Setter。 | 是。 |
-| `MARKUP_MAP_PROPERTY_WRITEONLY(KeyType, ValueType, Name)` | 声明初始为空、仅可替换整个受管字典的属性；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
-| `MARKUP_PROPERTY_WRITEONLY(Type, Name[, DefaultValue])` | 生成受保护的属性字段和公开 Setter；不生成 Getter。 | 是；可映射到反射 Setter 或蓝图函数。 |
-| `FMarkupCommand SelectItemCommand = FMarkupCommand::FromMember(...)` | 声明成员函数命令。 | 是；可映射到 `UFUNCTION`。 |
+### Property 与 Frontend 的边界
 
-`RegisterProperty` 与 `RegisterCommand` **只能写在派生类自己的构造函数体内**，不能写在普通成员函数、静态函数或类定义体中。类定义宏**只能写在类定义体内**，不能写进构造函数体或任何普通函数体。标量和对象属性宏可以在最后提供与属性类型匹配的 `DefaultValue`；Array 和 Map 属性宏没有默认值参数，始终构造为空集合。两者刻意分离：前者完成运行时登记，后者声明 C++ 属性接口。
+这里保留设计关系，不复制私有辅助类或再声明一套假想接口：
 
-宏应生成可阅读的 C++ 接口，而不是藏起业务逻辑。需要校验或联动时，开发者可手写属性字段、Getter、Setter，并将这些成员函数传给 `RegisterProperty`；页面写入将调用该 Setter。不能用属性 Setter 承载“保存”“购买”等独立意图，仍应使用命令。
+- 类型化 Property 保存业务值，非模板 Property 让属性登记表不必模板化；类型擦除不是前端适配。
+- Property 不实现、持有或返回 Frontend 接口。业务侧字符串使用 `FString`，不要求业务开发者提供 UTF-8。
+- 通用 Frontend 的 `IValue`、`IScalar`、`IObject`、`IArray`、`IMap` 位于 `MarkupUI::DataBinding::Frontend`，不是 Property 的基类。
+- Frontend 值按 Kind 区分 Scalar、Object、Array、Map，Scalar 再区分 ValueType；不另造重复的种类枚举。
+- Adapter 的共享引用管理 Adapter 自身，背后的业务对象按弱引用实时解析；读取失败返回无值，不用读取作用域长期保活业务对象。
+- 标量读取结果的有效期遵循 Scalar 接口约定，不把临时借用地址当作永久业务值；字符串转换属于前端通讯边界。
+- 模型按名称保留稳定空槽，尚未提供对象时不伪造业务默认数据；替换同名对象后清理旧绑定，再允许字段按需解析并刷新。
+- 数组与 Map 不能直接作为 DataContext。元素和值的支持范围见文末表格；不因为容器能存储某种 C++ 类型就推断该类型能绑定。
+- 集合整体替换由类型化 `SetValue` 完成；前端标量元素写回与集合整体写回是两种不同能力，后者不作为通用入口。
+- 任意原生类型可以作为 Property 的存储类型，但只有已支持的类型可以转换为前端可读写值。
+
 
 ### 文档的具名数据上下文
 
@@ -1210,21 +335,20 @@ RML 作者必须在文档加载前写好模型名：
 </div>
 ```
 
-C++ 只在文档上设置具名数据上下文，并且上下文必须是可观察 Object。元素不提供 `SetDataContext`；数组和 Map 只能是 Object 的属性：
+C++ 通过 `SRmlUiWidget` 为当前文档设置具名数据上下文，输入是原生可观察对象或 UObject。元素不提供 `SetDataContext`；数组和 Map 只能是对象的属性：
 
 ```cpp
-// 伪代码：Name 对应 RML 中的 data-model 名称。
-void SetDataContext(
-    FStringView Name,
-    TSharedPtr<IMarkupObservableObject> Context);
+// SRmlUiWidget 的公开成员声明摘录。两种输入都要求非空。
+bool SetDataContext(const FString& Name, const TSharedRef<MarkupUI::DataBinding::IObservableObject>& Object);
+bool SetDataContext(const FString& Name, UObject& Object);
+void RemoveDataContext(const FString& Name);
+void ClearDataContexts();
 ```
 
 MarkupUI 的文档包装对象必须早于原生 RmlUi Document 存在。加载 RML 时，胶水层为文档中静态声明的每个 `data-model` 建立稳定的模型槽；尚未设置 Object 的槽为空，所有读取安全返回无值。因此文档加载不依赖业务对象是否已经创建，也不要求调用方预先登记模型名。
 
 ```cpp
-SRmlUiWidget->GetDocument()->SetDataContext(
-    TEXT("inventory"),
-    InventoryState);
+Ui->SetDataContext(TEXT("inventory"), InventoryState);
 ```
 
 一份文档可以登记多个不同名称的数据上下文。每个名称对应一个稳定模型槽，不同 RML 子树通过各自静态声明的 `data-model` 选择模型。
@@ -1259,10 +383,10 @@ SRmlUiWidget->GetDocument()->SetDataContext(
 
 ### Object 的数组属性与 `data-for`
 
-`data-for` 是 RmlUi 的原生列表方案。`TMarkupObservableArray` 必须登记为当前可观察 Object 的数组属性，页面通过该属性执行 `data-for`；C++ 不提供单独的列表创建、更新、删除或移动回调。
+`data-for` 是 RmlUi 的原生列表方案。数组必须作为当前可观察 Object 已登记的 Property，页面通过该属性执行 `data-for`；C++ 不提供单独的列表创建、更新、删除或移动回调。
 
 ```cpp
-SRmlUiWidget->GetDocument()->SetDataContext(
+Ui->SetDataContext(
     TEXT("inventory"),
     InventoryState);
 ```
@@ -1271,9 +395,9 @@ SRmlUiWidget->GetDocument()->SetDataContext(
 
 ### Object 的字典属性
 
-`TMarkupObservableMap` 同样只能作为可观察 Object 的 Map 属性。它的键只支持 `FString`、`FName` 与 `int32`。RML 按键读取的具体语法暂不固定，后续通过 RmlUi 的自定义语法扩展确定。
+普通 `TMap` 和 `TMarkupObservableMap` 可以作为 Property，Map 键支持 `FString`、`FName`、`int32`。通用数据层的 Map 访问、元素写回和通知能力，与 RML 的字典表达式支持分开评价。
 
-`data-for` 遍历字典时，每个条目同时提供键和值。字典本身不承诺遍历顺序；为避免同一键值对在页面中无意义地移动，桥接层为 `data-for` 生成稳定顺序：`int32` 按数值升序，`FString` 与 `FName` 按文本升序。该排序只影响页面枚举顺序，不改变原始 `TMap`。
+当前不以 `data-for="Item : Map"` 或 `Map["key"]` 作为可用 RML 示例，也不承诺为页面提供键排序。完整 Map 语法与遍历是独立议题，不能因底层接口已有 Map 就标记为完成。
 
 ### 与原生 RmlUi 数据绑定的边界
 
@@ -1301,7 +425,7 @@ SRmlUiWidget->GetDocument()->SetDataContext(
 
 ### 支持的数据类型与路径
 
-首版属性值支持：布尔值、各种整数、浮点数、字符串、枚举、颜色、二维向量、对象、数组和字典。对象成员、数组元素，以及允许类型的字典键和值都通过 `FMarkupValue` 表达；故嵌套深度不依赖 UE 反射。
+首版属性值支持：布尔值、各种整数、浮点数、字符串、枚举、颜色、二维向量、对象、数组和字典。原生对象与反射对象通过各自的属性访问能力参与嵌套；不能用一套旧的假想值接口推断所有 C++ 类型都受支持。三维向量支持 `FVector3f` 与 `FVector`，进入 RML 后使用 float 精度。
 
 路径由字段名、对象成员和数组下标构成：
 
@@ -1316,43 +440,59 @@ items[0].count
 
 UObject 引用不会作为指针值暴露给 RML。原生 C++ 可观察对象可以通过 `TWeakObjectPtr<T>` 或 `TStrongObjectPtr<T>` 属性将 UObject、Actor 或组件作为下级对象节点公开，页面只能继续读取该对象允许绑定的反射属性。`UClass*`、委托、接口对象和软引用不作为首版绑定值；若 UI 只需要物品图标或角色名，仍应优先公开稳定 ID、文本和图片 URI，而不是扩大整个业务对象的页面可见范围。
 
+### 输入类型转换
+
+属性写回和命令参数按实际输入类型处理，不因为目标属性是整数、枚举或字符串就提前改变输入值。
+
+- UE 侧统一负责类型转换；枚举的具体成员合法性仍按目标枚举判断。
+- 转换失败保留原值，命令参数有任何一项失败时不执行命令。
+- 数值转换检查范围，普通浮点数转整数沿用截断语义；枚举额外要求没有小数部分。
+- 整数文本必须完整、没有溢出，不接受部分解析后忽略余下字符。
+- 字符串、Text、Name 可以相互转换；颜色与向量保持整体值语义，不自动拆分为参数。
+- 自定义转换器尚未提供注册入口，作为后续扩展，不视为当前已支持功能。
+
+### 枚举读写与命令参数
+
+- 枚举向页面公开数值，不自动公开枚举名称或 DisplayName。
+- UE 反射枚举写回和命令传参都检查底层整数范围与已声明枚举项；失败保留原值或不执行命令，并输出警告。
+- 普通 C++ 枚举没有反射项清单，只检查数值可表示性与底层整数范围，不承诺发现未声明的枚举值。
+- 小数、NaN、无穷大及越界数值被拒绝，不先截断成整数再接受。数值形式的 `2.0` 可表示整数；枚举名称字符串不转换为枚举值。
+- 表单以字符串提交枚举数值时，仅接受完整的十进制整数字符串，例如 `"2"`；拒绝 `"2.5"`、`"2abc"` 等内容。
+- 不自动组合 Flags。反射枚举组合值只有本身也是已声明项时才允许。
+- 上述规则适用于直接属性、集合中的枚举元素，以及原生命令和 UObject 命令参数。枚举通过有符号 64 位数值通讯，不承诺传递大于 `INT64_MAX` 的无符号枚举值。
+
 ### 更新和脏标记
 
-RmlUi 原生模型只支持顶层字段的脏标记。修改 `items[3].count` 后，受管数组或对象属性会自动通知 `items`，而不是要求业务代码手工通知：
+通知可携带相对于通知对象的属性路径；业务代码不需要自行缩减为 RML 顶层字段。已读取路径对应的通知在绑定更新中合并，最终由 RML 按顶层字段重新求值。
 
 ```cpp
-InventoryState->EditItems().Replace(ItemId, UpdatedItem);
+// Ui 已创建；业务拥有者应持续持有这些模型。
+TSharedRef<FInventoryUiState> InventoryState = MakeShared<FInventoryUiState>();
+TSharedRef<FPlayerUiState> PlayerState = MakeShared<FPlayerUiState>();
+Ui->SetDataContext(TEXT("inventory"), InventoryState);
+Ui->SetDataContext(TEXT("player"), PlayerState);
+
+InventoryState->AddItem(FString(TEXT("Potion")));
+InventoryState->SetGold(100);
+PlayerState->SetHealth(80);
 ```
 
-批量更新的边界属于文档，不属于单个 `FMarkupObservableObject`。这样一次业务操作可以同时改动文档中多个具名模型的对象、数组和 Map 属性：
-
-```cpp
-auto UpdateScope = SRmlUiWidget->GetDocument()->BeginDataUpdate();
-
-InventoryState->EditItems().Add(NewItem);
-InventoryState->SetGold(NewGold);
-PlayerState->SetHealth(NewHealth);
-```
-
-`UpdateScope` 在离开作用域时提交。文档收集这段期间来自其已挂载数据上下文的变化，并按“数据模型 + 顶层字段”去重后提交给 RmlUi。例如 `Gold` 连续修改三次，或多个对象都影响同一顶层字段 `inventory`，在本次提交中都只标记一次。
-
-更新作用域可以嵌套；只有最外层作用域结束时才提交。它不立即绘制或强制调用 RmlUi 更新，RML 仍在正常的文档更新阶段统一重新求值。作用域只合并当前文档的 RML 刷新请求，不阻止 `FMarkupObservableObject` 向游戏逻辑、存档或其他订阅者发送自身的变化通知。
-
-不使用 `BeginDataUpdate()` 时，属性变化仍会自动排入当前文档下一次正常更新；显式作用域只用于希望将一组跨对象改动作为一次 RML 提交的场合。视图会忽略没有实际变化的子值，但插件不承诺单个数组元素的独立刷新。背包、任务列表这类数据建议以顶层数组为刷新边界。
+上述调用可以连续执行，不需要 `BeginDataUpdate`、`EndDataUpdate` 或手工创建更新作用域。页面在下一次正常更新读取结果，不保证业务调用返回时布局已同步更新。通知合并不代表业务集合可以跨线程并发读写。
 
 ### 可观察集合与 RmlUi 桥接
 
-可观察集合自身始终保留细粒度变化：数组记录新增、追加、插入、删除与替换；字典记录新增键、替换键和值、删除键。集合是某个可观察对象属性时，属性存储订阅该集合的变化。
-
-当前桥接到 RmlUi 时，不假设 RmlUi 已支持这些细节变化。桥接层收到任意集合细节通知后，将其转换为该集合所属顶层属性的一次变化通知，例如 `Inventory.Items` 中的任意变更都会通知 `Items`；随后由当前 RmlUi 数据模型按顶层字段重新求值。
-
-细节通知不会在桥接时丢弃：桥接层在本次更新结束前保留原始集合变更记录。未来 RmlUi 集成层增加局部集合更新能力后，可直接消费同一份记录；模型、`UObject` 宏和蓝图节点不需要改变。
+- 可观察数组和 Map 的通知保留新增、删除、插入、替换、重置等动作；普通集合通过通知函数显式报告。
+- 通用数据层不假设前端只能整组刷新，也不要求业务方先收拢路径。
+- RML 绑定最终将变化收拢到当前模型的顶层字段。例如模型内路径为 `Inventory.Items` 时标脏 `Inventory`；路径直接为 `Items` 时标脏 `Items`。
+- 不承诺 RML 对某个数组元素进行独立 DataView 刷新，也不承诺所有原始变更明细会永久保存在绑定层。
 
 ### C++ 原生命令
 
-命令通过构造函数中的 `RegisterCommand` 与 `FMarkupCommand::FromMember` 登记在 `FMarkupObservableObject` 派生类中。它适合将 UI 意图交给控制器、子系统或游戏功能模块，而不要求它们是 `UObject`。命令参数由成员函数签名确定；对象挂载到模型时会自动出现在命令字典中。命令不捕获裸指针：调用前必须先锁定模型的 `TSharedPtr`，模型或目标对象关闭后命令安全地不执行。
+命令使用前文的“共享对象创建后登记”写法；不在构造函数里获取共享 Owner。它只负责接收 UI 意图，业务方法修改属性或集合后仍使用对应通知机制。命令自身持有弱 Owner，业务对象失效后调用不再执行。
 
 ## 双向绑定的完整规则
+
+本节的基础标量读写示例使用当前 API；访问权限、声明式校验、拒绝恢复与编辑冲突策略仍是设计目标，不能将这些目标当作已经全部实现的行为。
 
 ### 什么是双向绑定
 
@@ -1366,12 +506,18 @@ class FMusicSettingsUiState final : public FMarkupObservableObject
 public:
     FMusicSettingsUiState()
     {
-        RegisterProperty(TEXT("music_volume"), MusicVolumeProperty, &FMusicSettingsUiState::GetMusicVolume, &FMusicSettingsUiState::SetMusicVolume);
-        RegisterProperty(TEXT("enable_music"), EnableMusicProperty, &FMusicSettingsUiState::GetEnableMusic, &FMusicSettingsUiState::SetEnableMusic);
+        RegisterProperty(TEXT("music_volume"), MusicVolumeProperty);
+        RegisterProperty(TEXT("enable_music"), EnableMusicProperty);
     }
 
-    MARKUP_PROPERTY(float, MusicVolume, 0.8f)
-    MARKUP_PROPERTY(bool, EnableMusic, true)
+    float GetMusicVolume() const { return GetValue(MusicVolumeProperty); }
+    void SetMusicVolume(float Value) { SetValue(MusicVolumeProperty, Value); }
+    bool GetEnableMusic() const { return GetValue(EnableMusicProperty); }
+    void SetEnableMusic(bool Value) { SetValue(EnableMusicProperty, Value); }
+
+private:
+    TMarkupProperty<float> MusicVolumeProperty = TMarkupProperty<float>(0.8f);
+    TMarkupProperty<bool> EnableMusicProperty = TMarkupProperty<bool>(true);
 };
 ```
 
@@ -1390,64 +536,59 @@ RML 使用这个公开属性：
 
 ```cpp
 TSharedRef<FMusicSettingsUiState> Settings = MakeShared<FMusicSettingsUiState>();
-Ui->GetDocument()->SetDataContext(TEXT("settings"), Settings);
+Ui->SetDataContext(TEXT("settings"), Settings);
 ```
 
 | 谁先改变 | 示例代码或操作 | 结果 |
 | --- | --- | --- |
 | C++ / 游戏设置 | `Settings->SetMusicVolume(0.65f);` | `MusicVolume` 变化并通知；下一次文档更新时，滑条位置和 `<span>` 都显示 `0.65`。 |
 | 玩家 | 将滑条拖到 `0.30`，控件按正常 `change` 时机提交 | 输入值转换为 `float` 后写入 `MusicVolume`；写入成功时，模型值变为 `0.30`，随后控件和 `<span>` 显示模型最终值。 |
-| 玩家输入非法值 | 例如非数字、超出字段允许范围，或属性只读 | 写入被拒绝或修正；控件不保留未接受的值，而是显示模型中的有效值。 |
+| 非法输入与业务校验 | 类型不匹配、范围限制、只读约束 | 当前类型转换与未来业务校验需分别核查；上述示例没有声明范围或只读元数据，也不保证自动恢复控件。 |
 
-因此，双向绑定不是“控件永远相信自己的输入”，而是控件向可写属性提出写入请求，模型决定接受、拒绝或修正；模型值始终是最终来源。
+前端写入这里登记的 Property，不会自动经过示例中的普通 C++ Setter。若需要业务校验，不能仅在该 Setter 中加入逻辑后就假定页面写回也会执行它。
 
 `data-value` 只绑定单个可写标量路径；不要在这里写表达式，例如 `data-value="volume * 100"` 是不允许的。若 UI 显示的是百分比但存储的是 0 至 1，可增加只供展示的字段，或在字段 Write 中处理，而不是让 RML 推断反向公式。
 
 ### `data-value` 与 `data-checked`
 
-`data-value` 同步的是元素的 `value` 属性；`data-checked` 同步的是复选框或单选框的 `checked` 状态。两者不能互换。
+以下片段均放在声明了相应字段的 `data-model` 子树内；模型名不是属性前缀。`data-value` 同步的是元素的 `value` 属性；`data-checked` 同步的是复选框或单选框的 `checked` 状态。两者不能互换。
 
 复选框同时具有独立的 `value` 与 `checked`：前者表示该选项的提交值，通常是字符串；后者才表示玩家是否勾选。因此，不应使用 `data-value` 绑定布尔开关：
 
 ```html
 <!-- 错误：绑定的是 value，不是勾选状态。 -->
-<input type="checkbox" value="enable_music" data-value="settings.enable_music"/>
+<input type="checkbox" value="enable_music" data-value="enable_music"/>
 
 <!-- 正确：true 为勾选，false 为取消勾选。 -->
-<input type="checkbox" data-checked="settings.enable_music"/>
+<input type="checkbox" data-checked="enable_music"/>
 ```
 
-当 `settings.enable_music` 为 `true` 时，复选框勾选；为 `false` 时取消勾选。玩家切换复选框后，控件在正常 `change` 时机将新的 `bool` 写回模型。
+当 `enable_music` 为 `true` 时，复选框勾选；为 `false` 时取消勾选。玩家切换复选框后，控件在正常 `change` 时机将新的 `bool` 写回模型。
 
 单选组的 `checked` 状态由每个选项的 `value` 与同一个字段比较决定：
 
 ```html
 <input type="radio" name="difficulty" value="easy"
-       data-checked="settings.difficulty"/> 简单
+       data-checked="difficulty"/> 简单
 <input type="radio" name="difficulty" value="hard"
-       data-checked="settings.difficulty"/> 困难
+       data-checked="difficulty"/> 困难
 ```
 
-这里的 `settings.difficulty` 应是字符串或已声明的枚举；其值等于某个单选框的 `value` 时，该选项被选中。对枚举，字段定义必须给出允许项，不能接受任意字符串。
+这里的 `difficulty` 使用字符串；值等于某个单选框的 `value` 时，该选项被选中。这个例子不承诺字符串到枚举的自动映射。
 
 ### 字段方向和提交时机
 
-WPF 的“绑定模式”和“写回时机”是很有价值的产品概念，但 MarkupUI 不应为了模仿 XAML 而给 RML 另造一套绑定属性。每个可绑定属性创建时都具有属性访问控制。手写属性时显式传入控制值；使用宏时，由选择的宏确定控制值：
+当前 `RegisterProperty(Name, Property)` 只登记 Property；不存在 `EMarkupPropertyAccess` 或只读／只写属性宏，也不会把普通业务 Getter／Setter 自动登记为绑定访问器。
 
-```cpp
-FMarkupProperty MusicVolumeProperty = MakeMarkupProperty<float>(0.8f, EMarkupPropertyAccess::ReadWrite);
-MARKUP_PROPERTY_READONLY(int32, Gold, 0)
-```
+下表保留访问控制的产品设计目标，不表示当前已提供这些配置：
 
-| 属性访问控制 | RML 能读取 | RML 能写入 | 适用场景 |
-| --- | --- | --- | --- |
-| `ReadOnly` | 是 | 否；写入请求被拒绝。 | 金币、生命值、物品列表。 |
-| `ReadWrite` | 是 | 是。 | 设置滑条、复选框、普通表单。 |
-| `WriteOnly` | 否 | 是；页面可在事件中提交值。 | 搜索词、临时筛选条件、仅接受提交的数据。 |
+| 待讨论的访问控制 | 允许读取 | 允许写入 |
+| --- | --- | --- |
+| ReadOnly | 是 | 否 |
+| ReadWrite | 是 | 是 |
+| WriteOnly | 否 | 是 |
 
-属性访问控制只属于模型：它决定读取或写入请求是否被接受，**不决定页面选择何种绑定方向**。页面可声明任意方向；若方向请求的读取或写入不被模型允许，该请求被拒绝，模型值不会改变。
-
-属性访问控制只约束 RML 绑定过程。游戏 C++ 代码或蓝图仍可按自身业务逻辑直接修改模型属性；修改后，具有读取方向的页面绑定会收到更新。
+是否增加这类元数据需要单独决策，不能据此要求恢复旧的属性宏或 Getter／Setter 注册方案。普通 C++ Get/Set 的访问权限不等于前端读写权限。RML 的提交时机继续采用原生控件事件，不引入假想的 WPF 式配置参数。
 
 ### 页面绑定方向
 
@@ -1464,40 +605,12 @@ MARKUP_PROPERTY_READONLY(int32, Gold, 0)
 
 ### 页面方向与模型访问控制冲突
 
-以下模型分别公开一个只读开关和一个只写开关：
+这一部分属于待确认的访问控制目标，不是当前 API 的演示：
 
-```cpp
-class FBindingAccessUiState final : public FMarkupObservableObject
-{
-public:
-    FBindingAccessUiState()
-    {
-        RegisterProperty(TEXT("locked_option"), LockedOptionProperty, &FBindingAccessUiState::GetLockedOption);
-        RegisterProperty(TEXT("incoming_option"), IncomingOptionProperty, nullptr, &FBindingAccessUiState::SetIncomingOption);
-    }
-
-    MARKUP_PROPERTY_READONLY(bool, LockedOption, true)
-    MARKUP_PROPERTY_WRITEONLY(bool, IncomingOption, false)
-};
-```
-
-页面仍可请求与模型访问控制冲突的方向，但模型始终拒绝越权请求：
-
-```html
-<!-- 冲突一：data-checked 是双向的，但 locked_option 是 ReadOnly。 -->
-<input type="checkbox" data-checked="settings.locked_option"/>
-
-<!-- 冲突二：该绑定属性要读取值，但 incoming_option 是 WriteOnly。 -->
-<input type="checkbox" data-attrif-checked="settings.incoming_option"/>
-
-<!-- 合法：只在 change 时把值写入 WriteOnly 属性。 -->
-<input type="checkbox"
-       data-event-change="settings.incoming_option = ev.checked"/>
-```
-
-第一个控件会先显示 `locked_option` 的当前值；玩家切换后，写入被拒绝，模型值保持不变。由于该控件仍具有读取方向，MarkupUI 随后重新读取模型值并恢复控件显示。
-
-第二个控件的读取请求被拒绝：它不会从 `incoming_option` 获得初始或后续状态，开发环境应报告访问控制冲突。第三个控件没有读取方向，`change` 时的写入被接受；它适合只接收玩家输入、而不允许模型反向覆盖控件内容的场景。
+- 若将来提供只读属性，双向控件提出的写入必须被拒绝。
+- 若将来提供只写属性，页面的读取不能绕过权限。
+- 拒绝后是否立即恢复控件、如何显示错误，需要单独实现和验证；不能仅由 `RegisterProperty` 没有传 Setter 推断为只读。
+- 目前不要用已删除的 `MARKUP_PROPERTY_READONLY/WRITEONLY` 或虚构 Getter／Setter 重载编写例子。
 
 ### 输入转换和校验顺序
 
@@ -1507,7 +620,7 @@ public:
 4. 调用字段 Write；它执行最终业务校验，并返回接受、拒绝或修正。
 5. 仅在接受或修正后标记所属顶层字段；拒绝时不改变 UE 数据。
 
-`FMarkupWriteResult` 是拟议公开结果：接受、拒绝、接受但已修正。拒绝时控件恢复为上一次有效值；修正时，例如输入 1.5 被限制为 1.0，桥接层在本次写入结束后重新读取属性，控件随即显示 1.0。结果本身不保存借用的 `FMarkupValue`。
+以上是待验证的业务校验流程，并非现有注册接口的承诺。当前没有 `FMarkupWriteResult` 公共类型，也没有注册声明式约束的参数；不再以虚构结果类型作为实现要求。拒绝恢复、修正后重读的具体策略应另行确认。
 
 ```html
 <input type="number" min="0" max="99" data-value="purchase.quantity"/>
@@ -1518,7 +631,7 @@ public:
 
 ### 文本、输入法与外部更新冲突
 
-文本输入在编辑状态时，输入法合成文本、选择范围和光标位置都必须优先保留。默认策略如下：
+文本输入在编辑状态时，输入法合成文本、选择范围和光标位置都必须优先保留。以下为待验证的目标策略，不表示已完成输入冲突处理：
 
 - 玩家尚未提交编辑时，外部更新同一文本字段不覆盖正在输入的内容。
 - 控件触发 `change` 后提交；提交成功时显示已接受或修正后的值。
@@ -1532,16 +645,16 @@ public:
 常见的“修改设置后保存”应将字段绑定和保存命令分开：
 
 ```html
-<input type="checkbox" data-checked="settings.show_minimap"/>
+<input type="checkbox" data-checked="show_minimap"/>
 <button data-event-click="save_settings()">保存设置</button>
 ```
 
-`data-checked` 在 checkbox 的 `change` 时写回 `settings.show_minimap`；点击“保存设置”时只执行已登记的 `save_settings()` 命令。
+`data-checked` 在 checkbox 的 `change` 时写回 `show_minimap`；点击“保存设置”时只执行已登记的 `save_settings()` 命令。
 
 `data-event-*` 触发时也可以应用赋值表达式。若产品需要单独的“切换小地图”按钮，可以这样写：
 
 ```html
-<button data-event-click="settings.show_minimap = !settings.show_minimap">
+<button data-event-click="show_minimap = !show_minimap">
   切换小地图
 </button>
 ```
@@ -1553,6 +666,8 @@ public:
 从 RML 写回字段后，模型会把该字段标记为已处理。游戏状态随后发出的通知仅用于把最终值同步回控件，不应再次触发同一命令或产生无限循环。业务代码应只修改状态，不要在字段通知中模拟一次新的按钮点击。
 
 ## 蓝图支持
+
+本节 UObject 的 C++ 示例使用当前接口；蓝图节点清单属于目标设计／原型，不能据此认定任意 UObject 的正式蓝图工作流或 UMG 包装已经完成。
 
 蓝图与 UMG 可按模型名将业务 `UObject` 设置为 RML 文档的数据上下文。绑定路径使用 `UPROPERTY` 的反射名称；页面事件调用数据上下文上的 `UFUNCTION` 成员。
 
@@ -1572,8 +687,10 @@ class UMarkupInventoryData : public UObject
     GENERATED_BODY()
 
 public:
-    void SetGold(int32 InGold);
-    void RemoveInventoryItemAt(int32 Index);
+    // 本例业务函数只改数据，由后文调用者显式通知。
+    void SetGold(int32 InGold) { Gold = InGold; }
+    void RemoveInventoryItemAt(int32 Index) { InventoryItems.RemoveAt(Index); }
+    TArray<FName>& GetInventoryItems() { return InventoryItems; }
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
     int32 Gold = 0;
@@ -1585,22 +702,24 @@ public:
     TMap<FName, int32> ItemCounts;
 
     UFUNCTION(BlueprintCallable, Category = "Inventory")
-    void RequestClose();
+    void RequestClose() { /* 由项目接入关闭请求。 */ }
 };
 ```
 
 ### 设置数据上下文完成绑定
 
 ```cpp
-UMarkupInventoryData* InventoryData = NewObject<UMarkupInventoryData>();
-Ui->GetDocument()->SetDataContext(TEXT("inventory"), InventoryData);
+#include "UObject/StrongObjectPtr.h"
+
+// 由业务拥有者持有此强引用；不要把它当作绑定提供的保活。
+TStrongObjectPtr<UMarkupInventoryData> InventoryData(NewObject<UMarkupInventoryData>());
+Ui->SetDataContext(TEXT("inventory"), *InventoryData.Get());
 ```
 
 ```html
-<span>{{ Gold }}</span>
-<div data-for="InventoryItem : InventoryItems">{{ InventoryItem }}</div>
-<div data-for="ItemCount : ItemCounts">
-    {{ ItemCount.Key }}: {{ ItemCount.Value }}
+<div data-model="inventory">
+  <span>{{ Gold }}</span>
+  <div data-for="InventoryItem : InventoryItems">{{ InventoryItem }}</div>
 </div>
 ```
 
@@ -1616,7 +735,7 @@ Ui->GetDocument()->SetDataContext(TEXT("inventory"), InventoryData);
 | `Set <属性名> (Markup UI)` | 写入该对象的普通 `UPROPERTY`，再通知 RML 刷新依赖此属性的绑定。 |
 | Notify Markup Property Changed | 原生 Set 或 C++ 已经改值后，显式通知指定属性。 |
 
-`Set <属性名> (Markup UI)` 在写入成功后通知 MarkupUI 刷新该属性的绑定；普通原生 Set 不自动触发此通知。C++ 直接通过 `SRmlUiWidget->GetDocument()->BeginDataUpdate()` 创建更新作用域；蓝图无法直接持有该 C++ Document 对象，因此 `BeginDataUpdate` 和 `EndDataUpdate` 作为 `URmlUiWidget` 的蓝图函数转发到其当前 Document。
+`Set <属性名> (Markup UI)` 在写入成功后通知 MarkupUI 刷新该属性的绑定；普通原生 Set 不自动触发此通知。当前通知会自动合并，不提供 `BeginDataUpdate`／`EndDataUpdate`。
 
 ### `TArray` 属性的更新
 
@@ -1732,6 +851,11 @@ void UpdateGoldThroughBusinessApi(
     UMarkupInventoryData* InventoryData,
     int32 NewGold)
 {
+    if (!InventoryData)
+    {
+        return;
+    }
+
     InventoryData->SetGold(NewGold);
     MarkupUI::NotifyPropertyChanged(
         InventoryData,
@@ -1746,7 +870,16 @@ void RemoveInventoryItemThroughBusinessApi(
     UMarkupInventoryData* InventoryData,
     int32 Index)
 {
+    if (!InventoryData)
+    {
+        return;
+    }
+
     const TArray<FName>& InventoryItems = InventoryData->GetInventoryItems();
+    if (!InventoryItems.IsValidIndex(Index))
+    {
+        return;
+    }
     MarkupUI::NotifyBeginArrayDelete(InventoryItems, Index);
 
     InventoryData->RemoveInventoryItemAt(Index);
@@ -1823,16 +956,17 @@ Getter 的可见性只影响 C++ 调用方式，不改变绑定前提：`Items` 
 
 ## Slate（C++）使用草案
 
+以下沿用前文 `FInventoryUiState`，`InventoryRml` 是已取得的文档内容；资源域沿用 Widget 的资源上下文，`/Inventory.rml` 是该资源根下的逻辑 URI。
+
 Slate 使用者创建 `FMarkupObservableObject` 派生模型，并直接挂载到 Widget。
 
 ```cpp
 TSharedRef<SRmlUiWidget> Ui = SNew(SRmlUiWidget)
     .DocumentContent(InventoryRml)
-    .DocumentSourceUri(TEXT("/Game/UI/Inventory.rml"));
+    .DocumentSourceUri(TEXT("/Inventory.rml"));
 
-TSharedRef<FInventoryCollectionUiState> InventoryState =
-    MakeShared<FInventoryCollectionUiState>();
-Ui->GetDocument()->SetDataContext(
+TSharedRef<FInventoryUiState> InventoryState = MakeShared<FInventoryUiState>();
+Ui->SetDataContext(
     TEXT("inventory"),
     InventoryState);
 ```
@@ -1841,14 +975,14 @@ Ui->GetDocument()->SetDataContext(
 
 ## UMG（蓝图）使用草案
 
-`URmlUiWidget` 是可放入 Widget Blueprint 的控件。Widget Blueprint 或拥有者在构造、初始化时取得实际业务 `UObject`，并在文档上调用具名 `Set Data Context`。
+以下是未来 UMG 包装的设计目标，`URmlUiWidget` 不是当前已经提供的公开控件。Widget Blueprint 或拥有者在构造、初始化时取得实际业务 `UObject`，并在文档上调用具名 `Set Data Context`。
 
 推荐工作流：
 
 1. 取得当前角色、组件或其他业务 `UObject`。
 2. 使用与 RML `data-model` 相同的名称将该对象设置给文档；可以在文档加载前或加载后调用。
 3. 写入普通属性时使用 `Set <属性名> (Markup UI)`；修改数组或 Map 时使用对应的 `(Markup UI)` 集合操作节点。
-4. 业务对象通过原生 Set 或 C++ 修改属性后，调用 `Notify Markup Property Changed`；跨多个对象或多个属性合并更新时，在 `URmlUiWidget` 上调用 `BeginDataUpdate` 和 `EndDataUpdate`。
+4. 业务对象通过原生 Set 或 C++ 修改属性后，显式发送通知；多次通知自动合并，不设计另一套更新作用域。
 5. 目标对象销毁后，同名模型槽自动回到空状态，无需手动保活；页面读取安全返回无值。
 
 Designer 预览使用安全的预览对象，不得保存设置、触发命令或修改游戏世界。蓝图用户不需要通过 JSON 字符串填充数据；属性、数组和 Map 都沿用原始 `UObject` 属性的实际类型。
@@ -1875,12 +1009,12 @@ Designer 预览使用安全的预览对象，不得保存设置、触发命令�
 
 Frontend 不设置统一的读取生命周期管理器。每个 Adapter 都独立负责解析自己的弱数据源，并在每次同步接口调用开始时重新检查它：
 
-- 面向原生 C++ 模型的 Adapter 保存 `TWeakPtr<IMarkupObservableObject>`。读取函数开始时调用 `Pin()`，将得到的局部 `TSharedPtr` 保持到本次函数返回，然后立即释放。
-- 面向 `UObject` 的反射 Adapter 保存 `TWeakObjectPtr<UObject>`。它在游戏线程内检查对象仍然有效后立即完成本次反射访问，不缓存解析出的 `UObject*`，也不把 `UObject` 转换为 `IMarkupObservableObject`。
+- 面向原生 C++ 模型的 Adapter 保存 `TWeakPtr<MarkupUI::DataBinding::IObservableObject>`。读取函数开始时调用 `Pin()`，将得到的局部 `TSharedPtr` 保持到本次函数返回，然后立即释放。
+- 面向 `UObject` 的反射 Adapter 保存 `TWeakObjectPtr<UObject>`。它在游戏线程内检查对象仍然有效后立即完成本次反射访问，不缓存解析出的 `UObject*`，也不把 `UObject` 转换为 `MarkupUI::DataBinding::IObservableObject`。
 - Scalar、Object、Array 和 Map Adapter 遵循同一规则，但不会共同登记到一个跨调用保活集合中。一个 Adapter 读取成功，不代表下一次调用或另一个 Adapter 的读取仍然成功。
 - 弱引用已经失效时，本次操作直接返回无值或未处理，当前求值路径停止，页面使用安全默认值。
-- `FMarkupValue` 只通过 `TSharedPtr<IMarkupFrontendValue>` 保持 Adapter 自身有效。它不会因此保活业务对象，也不缓存 `UObject*`、原生对象裸指针或之前读取到的属性值。
-- Scalar 返回的当前值必须在同一次同步调用中被胶水层消费。字符串由 Scalar 自身以 UTF-8 形式管理，其数据不会由统一读取生命周期机制集中保存。
+- `MarkupUI::DataBinding::Frontend::FValue` 只通过 `TSharedPtr<IValue>` 保持 Adapter 自身有效。它不会因此保活业务对象，也不缓存 `UObject*`、原生对象裸指针或之前读取到的属性值。
+- Scalar 返回的当前值必须在同一次同步调用中被消费。String、Text、Name 的读写统一使用 `const FString*`，不另传长度；开发者不需要提供 UTF-8 数据。返回值在下一次读取或 Scalar 释放前有效。UTF-8 转换只属于外部 API 的适配边界。
 
 ### 命令回调中的生命周期安全
 
@@ -1947,8 +1081,10 @@ Frontend 不设置统一的读取生命周期管理器。每个 Adapter 都独�
 
 ## 自动化验收清单
 
+这是一份目标清单，不是已通过测试的报告；UMG、正式蓝图节点、访问控制和输入冲突策略应在相应功能实施后验收。
+
 - 同一份 RML 在 Slate 与 UMG 中，对同一模型数据得到一致的文字、属性、可见性和列表内容。
-- 模型宏生成的 Getter、Setter、只读权限、浮点比较、嵌套对象通知、集合通知和命令签名，与手写原生模型具有相同结果。
+- 当前 `TMarkupProperty<T>`、两参数 `RegisterProperty`、`SetValue`、嵌套对象与集合通知、命令签名按真实公开用法验收，不再要求复活旧属性宏或 Getter／Setter 注册重载。
 - 标量、对象、嵌套结构、数组、枚举、`FText` 与受限映射的转换正确；不支持的值明确失败。
 - `UObject` 数据上下文能通过字段通知或手动 `Notify Markup Property Changed` 刷新正确的属性；数组成员变化要求通知数组属性。
 - `Set Data Context` 接受模型名以及角色、组件或其他业务 `UObject`；不创建代理对象、镜像属性或第二份需要维护的蓝图资产。
@@ -1965,14 +1101,13 @@ Frontend 不设置统一的读取生命周期管理器。每个 Adapter 都独�
 - 文档重载、控件销毁、多个 Widget、多本地玩家不会串用模型、输入状态或命令。
 - UMG Designer 不触发命令或写回真实游戏对象。
 
-## 分阶段实施建议
+## 后续实施与复核
 
-1. **模型基础与宏**：统一值类型、属性访问器、顶层脏标记、可观察对象/集合宏和 Slate 显式模型；先验证展示与原生 `data-for` 列表。
-2. **文档具名数据上下文**：实现 `SRmlUiWidget` 文档中的多模型登记、同名 Object 替换、模型间隔离、跨对象数据更新作用域和对象数组属性的 `data-for` 回归。
-3. **UE 反射数据上下文**：实现 `SetDataContext(Name, UObject*)`、反射属性读写、嵌套结构转换、字段通知和显式属性通知。
-4. **蓝图通知节点与命令**：实现普通属性 Set、Array／Map 修改节点、原生节点转换、受限反射成员函数命令、值校验和文本输入冲突规则。
-5. **UMG 支持**：提供 `UMarkupUiWidget` 与具名 `SetDataContext` 的蓝图节点、事件委托和 Designer 预览；与 Slate 共用回归用例。
-6. **可选互操作**：评估与 UE MVVM 字段通知的更深整合、可复用数据源、多模型协调和 `data-rml`。这些均不能破坏当前白名单和双向写入契约。
+1. **现有原生模型**：以 `TMarkupProperty<T>`、实例注册、属性／集合通知和共享 Owner 命令为基准，核查功能；不把旧宏或旧 Store 示例当作缺口。
+2. **具名上下文与反射模型**：复核同名替换、清除、弱引用、混合路径与多模型通知；当前入口为 `SRmlUiWidget::SetDataContext`。
+3. **写回体验**：单独确认业务校验、访问控制、拒绝恢复和输入冲突是否需要新增能力。
+4. **蓝图与 UMG**：区分现有原型和正式对外功能，再安排节点、控件与预览验收。
+5. **Map 与其他扩展**：完整 RML Map 语法、局部数据上下文等单独讨论，不从通用数据层的能力推导为前端已支持。
 
 ## 尚待产品确认的选择
 
@@ -2013,6 +1148,7 @@ Frontend 不设置统一的读取生命周期管理器。每个 Adapter 都独�
 | UE 反射枚举 | ✅ | ✅ |
 | 普通 C++ 枚举 | ❌ | ✅ |
 | `FLinearColor`、`FVector2D` | ✅ | ✅ |
+| `FVector3f`、`FVector` | ✅ | ✅ |
 | `UObject*` | ✅ | ❌ |
 | `TObjectPtr<UObject>` | ✅ | ❌ |
 | `TWeakObjectPtr<UObject>` | ✅ | ✅ |

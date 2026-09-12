@@ -64,7 +64,7 @@ body {
 
 `/` 表示配置的 MarkupUI 资产资源根目录，不表示 Unreal 的全局 `/Game` 路径。完整规则请参阅[资源路径与根目录](Resource-Paths.md)。
 
-建议让 Font Face 的资产名与源字体文件名一致。这样 RCSS 可以继续使用熟悉的 `.ttf` 或 `.otf` URI，同时稳定地映射到同名 Unreal 资产。
+设计目录导入默认不给 Font Face 添加前缀，例如 `DingTalkJinBu.ttf` 对应 `DingTalkJinBu`。可以在 MarkupUI Settings 的 **Resources → Asset Naming → Font Face Prefix** 自定义前缀。RCSS 仍写 `DingTalkJinBu.ttf`；配置前缀后，优先查找当前配置的规范化资产，不存在时回退到无前缀资产。已有资产不会自动迁移，也可通过内容浏览器右键菜单 **Normalize MarkupUI Asset Names** 应用当前前缀。
 
 ## 一个字体文件与粗体、斜体
 
