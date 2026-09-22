@@ -37,6 +37,7 @@ Build interfaces with markup and stylesheets, then keep them close to the Unreal
 
 - [Resource paths and root directory](Usage/Resource-Paths.md)
 - [Using Unreal asset fonts](Usage/Unreal-Asset-Fonts.md)
+- [Tracing usage guide](Usage/Tracing.md)
 
 ## Roadmap
 

@@ -37,6 +37,7 @@
 
 - [资源路径与根目录](Usage/Resource-Paths.md)
 - [使用 Unreal 资产字体](Usage/Unreal-Asset-Fonts.md)
+- [Tracing 使用指南](Usage/Tracing.md)
 
 ## 路线图
 
