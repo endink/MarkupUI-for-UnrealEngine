@@ -1,13 +1,17 @@
 # 蓝图 DOM
 
-在 UMG 中添加 **MarkupUI** Widget，并设置 HTML Document 资产，或调用 **Set Html**。收到 **On Dom Ready** 后，再调用 **Get Root Element**。加载完成前返回的元素状态为 **DocNotReady**。
+在 UMG 中添加 **MarkupUI** Widget，并设置 HTML Document 资产，或调用 **Set Html**。收到 **On Document Ready** 后，再调用 **Get Root Element**。加载完成前返回的元素状态为 **DocNotReady**。
+
+每次成功加载或重新加载都会触发一次 **On Document Ready**。此时 DOM 已可查询和修改，首次布局会等待该事件中的同步蓝图逻辑返回。事件不等待图片、字体加载，也不代表首帧已经显示；Delay 和其他异步后续逻辑不在初始化等待范围内。
+
+**Set HTML**、**Set Document**、**Close Document** 是异步节点，需要指定 Widget。通过 **Completed** 和 **Failed** 引脚处理操作结果；Document Uri 留空时沿用 Widget 的地址。加载节点的 Completed 表示打开请求已接受，DOM 查询和初始化请仍放在 **On Document Ready** 中。关闭节点的 Completed 表示关闭完成。空 Document 会触发 Failed；清空内容请使用 Close Document。
 
 ## 查找和修改
 
 从根元素调用 QuerySelector 或 GetElementById。元素上的查询只查该元素范围内；GetClosest 向自身和祖先查找。把结果保存为 Element 变量，可以反复使用、复制和传给其他蓝图函数。
 
 ```text
-On Dom Ready
+On Document Ready
   → Get Root Element
   → GetElementById ("title")
   → 保存 Title Element
@@ -54,7 +58,7 @@ OnNameInput (Event)
 
 回调在 Game Thread 异步执行，值和表单字段保存事件发生当时的快照。回调中再次读取元素会得到当前值，可能已经发生变化。
 
-保存订阅返回值，可调用 **Unbind DOM Event** 取消。订阅值可以复制，取消其中一份会使其他副本也失效。丢弃订阅变量不会自动取消；重新加载、Clear Document 或移除 Widget 会取消该文档的全部订阅。重复绑定会增加监听，需主动取消旧订阅。
+保存订阅返回值，可调用 **Unbind DOM Event** 取消。订阅值可以复制，取消其中一份会使其他副本也失效。丢弃订阅变量不会自动取消；重新加载、Close Document 或移除 Widget 会取消该文档的全部订阅。重复绑定会增加监听，需主动取消旧订阅。
 
 ## 当前限制
 

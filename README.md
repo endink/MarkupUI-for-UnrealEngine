@@ -28,7 +28,7 @@ Build interfaces with markup and stylesheets, then keep them close to the Unreal
 ## Highlights
 
 - **HTML/CSS-style authoring** — Use markup, selectors, cascading styles, variables, Flex layout, transitions, animations, and transforms to describe UI.
-- **Native Unreal workflow** — Work with RML documents and RCSS stylesheets as Unreal assets, with standard import and reimport support.
+- **Native Unreal workflow** — Work with HTML documents and CSS stylesheets as Unreal assets, with standard import and reimport support.
 - **Slate integration** — Use MarkupUI as part of an Unreal UI, with mouse, keyboard, text input, focus, and cursor behavior available to authored interfaces.
 - **Flexible resources** — Load documents, styles, fonts, and images from Unreal assets or a disk-based content layout.
 - **Visual foundation** — Support practical UI rendering features such as clipping, transforms, compositing, filters, and saved visual resources, while documenting any unsupported visual syntax clearly.
@@ -42,10 +42,10 @@ Build interfaces with markup and stylesheets, then keep them close to the Unreal
 
 ## Roadmap
 
-MarkupUI is focused on making advanced RCSS visuals dependable in Unreal projects. Current work continues across mask composition, box shadows, gradients, custom shaders, visual regression coverage, and performance measurement.
+MarkupUI uses the MarkupUI SDK for HTML and CSS rendering in Unreal projects. Current work continues across visual regression coverage, performance measurement, and Unreal integration.
 
 The project favors accurate, explicit behavior: features that are not ready for reliable output should be documented as unavailable instead of silently producing a different result.
 
 ## Acknowledgements
 
-MarkupUI is built with [RmlUi](https://github.com/mikke89/RmlUi). Thank you to its community for creating a lightweight and expressive C++ UI middleware.
+MarkupUI uses the [MarkupUI SDK](https://github.com/endink/MarkupUI-Sdk).
